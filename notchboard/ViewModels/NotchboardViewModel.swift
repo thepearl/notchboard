@@ -76,8 +76,22 @@ final class NotchboardViewModel {
     }
 
     /// Restores settings + data from a previous session (called once at launch).
+    /// Persisted state is user-editable JSON on disk, so it's sanitised here rather than
+    /// trusted: `groupOrder`/`groups` are reconciled, and an unusable workspace falls back
+    /// to fresh seed data instead of stranding (or crashing) the UI.
     func restore(from persisted: PersistedAppState) {
-        workspace = persisted.workspace
+        var restored = persisted.workspace
+        restored.groupOrder.removeAll { restored.groups[$0] == nil }
+        let unordered = restored.groups.keys.filter { !restored.groupOrder.contains($0) }.sorted()
+        restored.groupOrder.append(contentsOf: unordered)
+        if restored.groups.isEmpty {
+            restored = MockData.workspace()
+        }
+
+        workspace = restored
+        if workspace.groups[activeGroupID] == nil {
+            activeGroupID = workspace.groupOrder.first ?? ""
+        }
         autoReleaseMinutes = persisted.autoReleaseMinutes
         startExpanded = persisted.startExpanded
         liveSyncEnabled = persisted.liveSyncEnabled
@@ -87,7 +101,11 @@ final class NotchboardViewModel {
     // MARK: - Derived
 
     var activeGroup: NBGroup {
-        workspace.groups[activeGroupID] ?? workspace.groups[workspace.groupOrder.first ?? ""]!
+        if let group = workspace.groups[activeGroupID] { return group }
+        if let firstID = workspace.groupOrder.first, let group = workspace.groups[firstID] { return group }
+        // Read on nearly every render — an inconsistent workspace must degrade to an empty
+        // group, never trap.
+        return NBGroup(id: "", label: "elements", singular: "element", secondaryKey: "", fields: [], elements: [])
     }
 
     var claimedCount: Int {
@@ -112,14 +130,15 @@ final class NotchboardViewModel {
     }
 
     func secondaryText(for element: NBElement, in group: NBGroup) -> String {
-        switch group.id {
-        case "promos":
-            return "\(element.values["discount_pct"] ?? "0")% off · exp \(element.values["expires"] ?? "—")"
-        case "products":
-            return "\(element.values["sku"] ?? "") · €\(element.values["price"] ?? "")"
-        default:
-            return element.values[group.secondaryKey] ?? ""
+        // Special-cased formats only apply when the schema actually carries those fields —
+        // group IDs alone aren't a contract once users create their own groups.
+        if group.id == "promos", let pct = element.values["discount_pct"] {
+            return "\(pct)% off · exp \(element.values["expires"] ?? "—")"
         }
+        if group.id == "products", let sku = element.values["sku"] {
+            return "\(sku) · €\(element.values["price"] ?? "")"
+        }
+        return element.values[group.secondaryKey] ?? ""
     }
 
     func memberName(_ who: String) -> String {
@@ -235,7 +254,7 @@ final class NotchboardViewModel {
             return
         }
         let element = NBElement(
-            id: "x\(Int(Date().timeIntervalSince1970 * 1000))",
+            id: UUID().uuidString,
             name: trimmedName, env: addEnvironment, isFavorite: false, claimedBy: nil,
             note: addNote.trimmingCharacters(in: .whitespacesAndNewlines),
             lastUsed: "just now, by you", values: addValues
