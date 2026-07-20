@@ -27,6 +27,17 @@ struct GroupTabsView: View {
 
             Spacer(minLength: 8)
 
+            if !viewModel.activeGroup.id.isEmpty {
+                Button(action: viewModel.openEditGroup) {
+                    Text("✎")
+                        .font(NBFont.ui(11))
+                        .foregroundStyle(NBColor.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)
+                .help("edit “\(viewModel.activeGroup.label)” (rename, fields, delete)")
+            }
+
             Button(action: viewModel.openNewGroup) {
                 Text("＋ new group")
                     .font(NBFont.ui(11))

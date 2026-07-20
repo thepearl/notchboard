@@ -8,6 +8,10 @@ import SwiftUI
 struct NewGroupView: View {
     @Bindable var viewModel: NotchboardViewModel
 
+    @State private var confirmingDelete = false
+
+    private var isEditing: Bool { viewModel.editingGroupID != nil }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -16,6 +20,9 @@ struct NewGroupView: View {
                 fieldsSection
                 Spacer(minLength: 20)
                 actions
+                if isEditing {
+                    deleteSection
+                }
             }
             .padding(19)
         }
@@ -30,7 +37,7 @@ struct NewGroupView: View {
                     .padding(4)
             }
             .buttonStyle(.plain)
-            Text("new group")
+            Text(isEditing ? "edit group" : "new group")
                 .font(NBFont.ui(13, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
         }
@@ -75,10 +82,35 @@ struct NewGroupView: View {
         }
     }
 
+    private var deleteSection: some View {
+        let elementCount = viewModel.activeGroup.elements.count
+        return HStack {
+            Spacer()
+            Button {
+                if confirmingDelete {
+                    viewModel.deleteGroup(viewModel.editingGroupID ?? "")
+                } else {
+                    confirmingDelete = true
+                }
+            } label: {
+                Text(confirmingDelete
+                     ? "really delete “\(viewModel.activeGroup.label)” and its \(elementCount) element\(elementCount == 1 ? "" : "s")?"
+                     : "delete group…")
+                    .font(NBFont.mono(9))
+                    .foregroundStyle(NBColor.red)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.red.opacity(confirmingDelete ? 0.8 : 0.35), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 14)
+    }
+
     private var actions: some View {
         HStack(spacing: 6) {
-            Button(action: viewModel.createGroup) {
-                Text("create group")
+            Button(action: viewModel.saveGroup) {
+                Text(isEditing ? "save changes" : "create group")
                     .font(NBFont.ui(11.5, weight: .bold))
                     .foregroundStyle(NBColor.background)
                     .frame(maxWidth: .infinity)

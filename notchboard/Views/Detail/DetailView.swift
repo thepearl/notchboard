@@ -9,6 +9,8 @@ struct DetailView: View {
     @Bindable var viewModel: NotchboardViewModel
     let element: NBElement
 
+    @State private var confirmingDelete = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -174,6 +176,32 @@ struct DetailView: View {
                     .font(NBFont.mono(8))
                     .foregroundStyle(NBColor.textMuted)
             }
+
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.openEdit(element)
+                } label: {
+                    Text("edit")
+                        .font(NBFont.mono(9))
+                        .foregroundStyle(NBColor.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)
+
+                Button {
+                    if confirmingDelete {
+                        viewModel.deleteElement(element.id)
+                    } else {
+                        confirmingDelete = true
+                    }
+                } label: {
+                    Text(confirmingDelete ? "really delete?" : "delete…")
+                        .font(NBFont.mono(9))
+                        .foregroundStyle(NBColor.red.opacity(confirmingDelete ? 1 : 0.7))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 8)
         }
         .padding(.top, 18)
     }

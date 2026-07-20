@@ -29,7 +29,7 @@ struct AddElementView: View {
                     .padding(4)
             }
             .buttonStyle(.plain)
-            Text("new \(viewModel.activeGroup.singular)")
+            Text(viewModel.editingElementID == nil ? "new \(viewModel.activeGroup.singular)" : "edit \(viewModel.activeGroup.singular)")
                 .font(NBFont.ui(13, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
         }
@@ -72,8 +72,8 @@ struct AddElementView: View {
 
     private var actions: some View {
         HStack(spacing: 6) {
-            Button(action: viewModel.createElement) {
-                Text("create \(viewModel.activeGroup.singular)")
+            Button(action: viewModel.saveElement) {
+                Text(viewModel.editingElementID == nil ? "create \(viewModel.activeGroup.singular)" : "save changes")
                     .font(NBFont.ui(11.5, weight: .bold))
                     .foregroundStyle(NBColor.background)
                     .frame(maxWidth: .infinity)

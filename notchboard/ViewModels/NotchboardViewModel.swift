@@ -37,13 +37,17 @@ final class NotchboardViewModel {
     var tooltipElementID: String?
     var revealedFieldKeys: Set<String> = [] // key = "\(elementID).\(fieldKey)"
 
-    // MARK: Add-element form
+    // MARK: Add/edit-element form
+    /// Non-nil while the add form is editing an existing element instead of creating one.
+    var editingElementID: String?
     var addName: String = ""
     var addEnvironment: NBEnvironment = .dev
     var addNote: String = ""
     var addValues: [String: String] = [:]
 
-    // MARK: New-group form
+    // MARK: New/edit-group form
+    /// Non-nil while the group form is editing an existing group instead of creating one.
+    var editingGroupID: String?
     var newGroupName: String = ""
     var newGroupFields: [NBField] = [
         NBField(key: "name", label: "name", type: .text),
@@ -175,6 +179,7 @@ final class NotchboardViewModel {
     }
 
     func openAdd() {
+        editingElementID = nil
         addName = ""
         addValues = [:]
         addNote = ""
@@ -182,12 +187,34 @@ final class NotchboardViewModel {
         currentView = .add
     }
 
+    /// Opens the element form prefilled for editing — same form as `openAdd`, save updates
+    /// in place instead of creating.
+    func openEdit(_ element: NBElement) {
+        editingElementID = element.id
+        addName = element.name
+        addEnvironment = element.env == .all ? .dev : element.env
+        addNote = element.note
+        addValues = element.values
+        currentView = .add
+    }
+
     func openNewGroup() {
+        editingGroupID = nil
         newGroupName = ""
         newGroupFields = [
             NBField(key: "name", label: "name", type: .text),
             NBField(key: "value", label: "value", type: .text),
         ]
+        currentView = .newGroup
+    }
+
+    /// Opens the group form prefilled with the active group's name and schema.
+    func openEditGroup() {
+        let group = activeGroup
+        guard !group.id.isEmpty else { return }
+        editingGroupID = group.id
+        newGroupName = group.label
+        newGroupFields = group.fields
         currentView = .newGroup
     }
 
@@ -291,14 +318,28 @@ final class NotchboardViewModel {
         workspace.groups[activeGroupID] = group
     }
 
-    // MARK: - Actions: add element
+    // MARK: - Actions: add/edit element
 
-    func createElement() {
+    func saveElement() {
         let trimmedName = addName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             toast("give it a display name first", color: .red)
             return
         }
+
+        if let editingID = editingElementID {
+            mutate(editingID) { element in
+                element.name = trimmedName
+                element.env = addEnvironment
+                element.note = addNote.trimmingCharacters(in: .whitespacesAndNewlines)
+                element.values = addValues
+            }
+            editingElementID = nil
+            currentView = .detail(elementID: editingID)
+            toast("“\(trimmedName)” updated · synced to team", color: .green)
+            return
+        }
+
         let element = NBElement(
             id: UUID().uuidString,
             name: trimmedName, env: addEnvironment, isFavorite: false, claimedBy: nil,
@@ -312,7 +353,24 @@ final class NotchboardViewModel {
         toast("“\(element.name)” added · synced to team", color: .green)
     }
 
-    // MARK: - Actions: new group
+    func deleteElement(_ elementID: String) {
+        guard var group = workspace.groups[activeGroupID],
+              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
+        let element = group.elements.remove(at: idx)
+        workspace.groups[activeGroupID] = group
+
+        // The persisted JSON only ever held placeholders; the real secret values live in
+        // the Keychain and must be cleaned up with the element.
+        for field in group.fields where field.type == .secret {
+            SecretsStore.delete(for: "\(element.id).\(field.key)")
+        }
+        revealedFieldKeys = revealedFieldKeys.filter { !$0.hasPrefix("\(elementID).") }
+
+        currentView = .list
+        toast("“\(element.name)” deleted", color: .red)
+    }
+
+    // MARK: - Actions: new/edit group
 
     func addNewGroupField() {
         newGroupFields.append(NBField(key: "field_\(newGroupFields.count + 1)", label: "field_\(newGroupFields.count + 1)", type: .text))
@@ -322,13 +380,19 @@ final class NotchboardViewModel {
         newGroupFields.removeAll { $0.id == id }
     }
 
-    func createGroup() {
+    func saveGroup() {
         let name = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             toast("name the group first", color: .red)
             return
         }
-        let groupID = name.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "_", options: .regularExpression)
+
+        if let editingID = editingGroupID {
+            updateGroup(editingID, name: name)
+            return
+        }
+
+        let groupID = Self.slug(name)
         guard workspace.groups[groupID] == nil else {
             toast("group already exists", color: .red)
             return
@@ -337,7 +401,7 @@ final class NotchboardViewModel {
             .filter { !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map { field -> NBField in
                 var f = field
-                f.key = field.label.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "_", options: .regularExpression)
+                f.key = Self.slug(field.label)
                 return f
             }
         guard let firstField = fields.first else {
@@ -346,7 +410,7 @@ final class NotchboardViewModel {
         }
         let group = NBGroup(
             id: groupID, label: name.lowercased(),
-            singular: name.lowercased().hasSuffix("s") ? String(name.lowercased().dropLast()) : name.lowercased(),
+            singular: Self.singularise(name),
             secondaryKey: firstField.key, fields: fields, elements: []
         )
         workspace.groups[groupID] = group
@@ -354,6 +418,78 @@ final class NotchboardViewModel {
         activeGroupID = groupID
         currentView = .list
         toast("group “\(name)” created · template synced", color: .green)
+    }
+
+    /// Applies the group form to an existing group. Fields that already existed (matched by
+    /// their stable `NBField.id`) keep their `key`, so element values survive a relabel;
+    /// only newly added fields derive a key from their label. Values (and Keychain secrets)
+    /// of removed fields are dropped.
+    private func updateGroup(_ groupID: String, name: String) {
+        guard var group = workspace.groups[groupID] else { return }
+
+        let existingByID = Dictionary(uniqueKeysWithValues: group.fields.map { ($0.id, $0) })
+        var usedKeys = Set<String>()
+        var fields: [NBField] = []
+        for field in newGroupFields where !field.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var f = field
+            f.key = existingByID[field.id]?.key ?? Self.slug(field.label)
+            while usedKeys.contains(f.key) { f.key += "_" }
+            usedKeys.insert(f.key)
+            fields.append(f)
+        }
+        guard let firstField = fields.first else {
+            toast("add at least one field", color: .red)
+            return
+        }
+
+        let keptKeys = Set(fields.map(\.key))
+        let removedSecretKeys = group.fields
+            .filter { $0.type == .secret && !keptKeys.contains($0.key) }
+            .map(\.key)
+        for idx in group.elements.indices {
+            group.elements[idx].values = group.elements[idx].values.filter { keptKeys.contains($0.key) }
+        }
+        for element in group.elements {
+            for key in removedSecretKeys {
+                SecretsStore.delete(for: "\(element.id).\(key)")
+            }
+        }
+
+        group.label = name.lowercased()
+        group.singular = Self.singularise(name)
+        group.fields = fields
+        group.secondaryKey = firstField.key
+        workspace.groups[groupID] = group
+
+        editingGroupID = nil
+        currentView = .list
+        toast("group “\(name)” updated", color: .green)
+    }
+
+    func deleteGroup(_ groupID: String) {
+        guard let group = workspace.groups[groupID] else { return }
+        for field in group.fields where field.type == .secret {
+            for element in group.elements {
+                SecretsStore.delete(for: "\(element.id).\(field.key)")
+            }
+        }
+        workspace.groups.removeValue(forKey: groupID)
+        workspace.groupOrder.removeAll { $0 == groupID }
+        if activeGroupID == groupID {
+            activeGroupID = workspace.groupOrder.first ?? ""
+        }
+        editingGroupID = nil
+        currentView = .list
+        toast("group “\(group.label)” deleted", color: .red)
+    }
+
+    private static func slug(_ text: String) -> String {
+        text.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "_", options: .regularExpression)
+    }
+
+    private static func singularise(_ name: String) -> String {
+        let lowered = name.lowercased()
+        return lowered.hasSuffix("s") ? String(lowered.dropLast()) : lowered
     }
 
     // MARK: - Toasts
