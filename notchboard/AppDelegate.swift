@@ -25,6 +25,8 @@ private enum PanelContentMode: Equatable {
     case notch
     case notchWithCoachMark
     case expandedPanel
+    /// Undocked panel shown from the menu bar when Simulator/Accessibility is unavailable.
+    case fallbackPanel
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -40,6 +42,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastContentMode: PanelContentMode?
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
+
+    /// Menu-bar fallback (vision.md §9): when true and no Simulator window is available to
+    /// dock to, the panel shows undocked (centred once, then user-draggable) instead of
+    /// hiding. Docking always takes precedence the moment Simulator is visible again.
+    private var fallbackPanelVisible = false
+    private var fallbackMenuItem: NSMenuItem?
 
     private static let onboardingSize = CGSize(width: 468, height: 470)
     private static let coachMarkExtraWidth: CGFloat = 16 + NBMetrics.coachMarkWidth + 20
@@ -136,6 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         menu.addItem(makeItem("Toggle Expand / Collapse", #selector(toggleExpandedFromMenu), key: ""))
+        let fallbackItem = makeItem("Show Panel (Undocked)", #selector(toggleFallbackFromMenu), key: "")
+        menu.addItem(fallbackItem)
+        fallbackMenuItem = fallbackItem
         menu.addItem(makeItem("Replay Onboarding…", #selector(replayOnboardingFromMenu), key: ""))
         menu.addItem(.separator())
         menu.addItem(makeItem("Settings…", #selector(openSettingsFromMenu), key: ","))
@@ -158,6 +169,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func replayOnboardingFromMenu() {
         onboarding.reset()
+    }
+
+    @objc private func toggleFallbackFromMenu() {
+        setFallbackVisible(!fallbackPanelVisible)
+    }
+
+    private func setFallbackVisible(_ visible: Bool) {
+        fallbackPanelVisible = visible
+        fallbackMenuItem?.title = visible ? "Hide Undocked Panel" : "Show Panel (Undocked)"
+        if visible {
+            viewModel.isExpanded = true
+            viewModel.showCoachMark = false
+        }
+        updatePanelFrame()
     }
 
     @objc private func quitFromMenu() {
@@ -200,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func handleGlobalShortcut(_ event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return false }
-        guard tracker.isSimulatorRunning, !onboarding.isPresented else { return false }
+        guard tracker.isSimulatorRunning || fallbackPanelVisible, !onboarding.isPresented else { return false }
 
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "k":
@@ -233,14 +258,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Docked to Simulator: once onboarded, Notchboard only exists alongside a running,
-        // visible Simulator window. If Simulator quits, closes, minimizes, or is hidden,
-        // Notchboard disappears with it; the instant Simulator is visible again, Notchboard
-        // redocks automatically.
+        // Docked to Simulator: once onboarded, Notchboard normally only exists alongside a
+        // running, visible Simulator window — unless the user asked for the undocked
+        // fallback from the menu bar. The instant Simulator is visible again, docking
+        // takes precedence and the panel snaps back to its edge.
         guard tracker.isSimulatorRunning, let simFrame = tracker.simulatorWindowFrame else {
-            hide(panel)
+            if fallbackPanelVisible {
+                layoutFallbackPanel(panel)
+            } else {
+                hide(panel)
+            }
             return
         }
+        panel.isMovableByWindowBackground = false
         show(panel)
 
         let mode: PanelContentMode = viewModel.isExpanded
@@ -249,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let size: CGSize
         switch mode {
-        case .expandedPanel:
+        case .expandedPanel, .fallbackPanel:
             size = CGSize(width: NBMetrics.panelWidth, height: NBMetrics.panelHeight)
         case .notchWithCoachMark:
             size = CGSize(width: NBMetrics.notchWidth + Self.coachMarkExtraWidth, height: NBMetrics.notchHeight + 60)
@@ -261,6 +291,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let x = simFrame.maxX
         let y = simFrame.midY - size.height / 2
         apply(NSRect(x: x, y: y, width: size.width, height: size.height), to: panel, mode: mode)
+    }
+
+    /// Lays out the undocked fallback panel. Positioned once on entry (centred on the
+    /// screen with the mouse), then left alone so the user can drag it around — a per-tick
+    /// reposition would fight the drag. Collapsing while undocked dismisses the panel,
+    /// since a notch docked to nothing makes no sense.
+    private func layoutFallbackPanel(_ panel: NSPanel) {
+        guard viewModel.isExpanded else {
+            setFallbackVisible(false)
+            viewModel.isExpanded = true
+            return
+        }
+        show(panel)
+        panel.isMovableByWindowBackground = true
+        guard lastContentMode != .fallbackPanel else { return }
+        let size = CGSize(width: NBMetrics.panelWidth, height: NBMetrics.panelHeight)
+        guard let screen = screenNearMouse() else { return }
+        let origin = CGPoint(x: screen.frame.midX - size.width / 2, y: screen.frame.midY - size.height / 2)
+        apply(NSRect(origin: origin, size: size), to: panel, mode: .fallbackPanel)
     }
 
     /// The screen containing the mouse cursor, falling back to the primary screen — used so
