@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct notchboardApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        // Notchboard has no normal window — AppDelegate creates a borderless floating panel
+        // that docks to the real Simulator.app window. This empty Settings scene just
+        // satisfies SwiftUI's requirement that an App have at least one Scene.
+        Settings {
+            EmptyView()
         }
     }
 }
