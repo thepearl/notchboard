@@ -27,6 +27,7 @@ struct PersistedAppState: Codable, Equatable {
     var startExpanded: Bool
     var liveSyncEnabled: Bool
     var deeplinkScheme: String
+    var dockEdge: NBDockEdge
     var onboardingCompleted: Bool
     var onboardingName: String
 
@@ -36,6 +37,7 @@ struct PersistedAppState: Codable, Equatable {
         startExpanded: Bool,
         liveSyncEnabled: Bool,
         deeplinkScheme: String,
+        dockEdge: NBDockEdge,
         onboardingCompleted: Bool,
         onboardingName: String
     ) {
@@ -45,6 +47,7 @@ struct PersistedAppState: Codable, Equatable {
         self.startExpanded = startExpanded
         self.liveSyncEnabled = liveSyncEnabled
         self.deeplinkScheme = deeplinkScheme
+        self.dockEdge = dockEdge
         self.onboardingCompleted = onboardingCompleted
         self.onboardingName = onboardingName
     }
@@ -60,6 +63,7 @@ struct PersistedAppState: Codable, Equatable {
         startExpanded = try container.decodeIfPresent(Bool.self, forKey: .startExpanded) ?? true
         liveSyncEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveSyncEnabled) ?? true
         deeplinkScheme = try container.decodeIfPresent(String.self, forKey: .deeplinkScheme) ?? ""
+        dockEdge = try container.decodeIfPresent(NBDockEdge.self, forKey: .dockEdge) ?? .right
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
         onboardingName = try container.decodeIfPresent(String.self, forKey: .onboardingName) ?? ""
     }

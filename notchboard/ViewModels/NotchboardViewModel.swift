@@ -35,6 +35,9 @@ final class NotchboardViewModel {
     var environmentFilter: NBEnvironment = .all
     var searchText: String = ""
     var tooltipElementID: String?
+    /// The row highlighted for keyboard navigation in the list (arrows/return). Distinct
+    /// from the tooltip and from the open detail view.
+    var keyboardSelectionID: String?
     var revealedFieldKeys: Set<String> = [] // key = "\(elementID).\(fieldKey)"
     /// Elements the user asked to be pinged about when they become free. Cleared once the
     /// notification fires. In-memory only — a watch doesn't outlive the session.
@@ -67,6 +70,8 @@ final class NotchboardViewModel {
     /// The target app's debug URL scheme for "login on sim" — e.g. "brewly" fires
     /// brewly://debug/login?user=…. Empty means the deeplink bridge is unconfigured.
     var deeplinkScheme: String = ""
+    /// Which edge of the Simulator window the notch/panel docks to.
+    var dockEdge: NBDockEdge = .right
 
     // MARK: Global shortcuts (⌘K / ⌘N — see AppDelegate's global NSEvent monitor)
     /// Bumped whenever the global ⌘K shortcut fires; the search field observes this and
@@ -95,6 +100,7 @@ final class NotchboardViewModel {
             startExpanded: startExpanded,
             liveSyncEnabled: liveSyncEnabled,
             deeplinkScheme: deeplinkScheme,
+            dockEdge: dockEdge,
             onboardingCompleted: onboardingCompleted,
             onboardingName: onboardingName
         )
@@ -121,6 +127,7 @@ final class NotchboardViewModel {
         startExpanded = persisted.startExpanded
         liveSyncEnabled = persisted.liveSyncEnabled
         deeplinkScheme = persisted.deeplinkScheme
+        dockEdge = persisted.dockEdge
         isExpanded = persisted.startExpanded
     }
 
@@ -229,6 +236,35 @@ final class NotchboardViewModel {
     func selectGroup(_ id: String) {
         activeGroupID = id
         currentView = .list
+        keyboardSelectionID = nil
+    }
+
+    // MARK: - Actions: keyboard navigation (list view)
+
+    /// Moves the keyboard highlight up (-1) or down (+1) through the currently filtered
+    /// rows, clamping at the ends and starting from the top/bottom when nothing is selected.
+    func moveKeyboardSelection(_ delta: Int) {
+        let elements = filteredElements
+        guard !elements.isEmpty else { return }
+        let currentIndex = elements.firstIndex { $0.id == keyboardSelectionID }
+        let nextIndex: Int
+        if let currentIndex {
+            nextIndex = min(max(currentIndex + delta, 0), elements.count - 1)
+        } else {
+            nextIndex = delta > 0 ? 0 : elements.count - 1
+        }
+        keyboardSelectionID = elements[nextIndex].id
+    }
+
+    /// Opens the keyboard-highlighted row (Return). Returns false if nothing is highlighted,
+    /// so the caller can let the key fall through.
+    @discardableResult
+    func openKeyboardSelection() -> Bool {
+        guard let id = keyboardSelectionID, let element = filteredElements.first(where: { $0.id == id }) else {
+            return false
+        }
+        openDetail(element)
+        return true
     }
 
     func toggleExpanded() {

@@ -332,8 +332,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             size = CGSize(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight)
         }
 
-        // Dock flush against the Simulator window's right edge, vertically centered on it.
-        let x = simFrame.maxX
+        // Dock flush against the chosen Simulator window edge, vertically centered on it.
+        let x = viewModel.dockEdge == .right ? simFrame.maxX : simFrame.minX - size.width
         let y = simFrame.midY - size.height / 2
         apply(NSRect(x: x, y: y, width: size.width, height: size.height), to: panel, mode: mode)
     }

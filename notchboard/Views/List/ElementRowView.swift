@@ -8,6 +8,7 @@ import SwiftUI
 struct ElementRowView: View {
     @Bindable var viewModel: NotchboardViewModel
     let element: NBElement
+    var isKeyboardSelected: Bool = false
 
     @State private var hovering = false
 
@@ -70,7 +71,11 @@ struct ElementRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 11)
-        .background(hovering ? NBColor.rowHover : Color.clear)
+        .background((hovering || isKeyboardSelected) ? NBColor.rowHover : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 3)
+                .stroke(isKeyboardSelected ? NBColor.amber.opacity(0.6) : Color.clear, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .contentShape(Rectangle())
         .onTapGesture { viewModel.openDetail(element) }

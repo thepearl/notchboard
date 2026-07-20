@@ -14,16 +14,31 @@ struct SettingsView: View {
     @Bindable var viewModel: NotchboardViewModel
     let onReplayOnboarding: () -> Void
 
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
+
     var body: some View {
         Form {
             Section("Behavior") {
                 Toggle("Start expanded when docking", isOn: $viewModel.startExpanded)
+
+                Picker("Dock to", selection: $viewModel.dockEdge) {
+                    ForEach(NBDockEdge.allCases) { edge in
+                        Text(edge.label).tag(edge)
+                    }
+                }
 
                 Stepper(value: $viewModel.autoReleaseMinutes, in: 5...240, step: 5) {
                     Text("Auto-release claims after \(viewModel.autoReleaseMinutes) min idle")
                 }
 
                 Toggle("Live sync (simulated presence)", isOn: $viewModel.liveSyncEnabled)
+
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        // Reflect what the system actually did — registration can fail
+                        // (e.g. an unsigned build), and the toggle shouldn't lie.
+                        launchAtLogin = LaunchAtLogin.setEnabled(newValue)
+                    }
             }
 
             Section {

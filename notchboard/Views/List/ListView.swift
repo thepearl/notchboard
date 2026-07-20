@@ -16,16 +16,27 @@ struct ListView: View {
             GroupTabsView(viewModel: viewModel)
 
             // Rows container
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(viewModel.filteredElements) { element in
-                        ElementRowView(viewModel: viewModel, element: element)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(viewModel.filteredElements) { element in
+                            ElementRowView(
+                                viewModel: viewModel,
+                                element: element,
+                                isKeyboardSelected: viewModel.keyboardSelectionID == element.id
+                            )
+                            .id(element.id)
+                        }
+                        if viewModel.filteredElements.isEmpty {
+                            RowsEmptyStateView()
+                        }
                     }
-                    if viewModel.filteredElements.isEmpty {
-                        RowsEmptyStateView()
-                    }
+                    .padding(6)
                 }
-                .padding(6)
+                .onChange(of: viewModel.keyboardSelectionID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                }
             }
             .background(NBColor.field)
             .overlay(
@@ -38,6 +49,10 @@ struct ListView: View {
 
             ListFooterView(viewModel: viewModel)
         }
+        .focusable()
+        .onKeyPress(.downArrow) { viewModel.moveKeyboardSelection(1); return .handled }
+        .onKeyPress(.upArrow) { viewModel.moveKeyboardSelection(-1); return .handled }
+        .onKeyPress(.return) { viewModel.openKeyboardSelection() ? .handled : .ignored }
     }
 }
 

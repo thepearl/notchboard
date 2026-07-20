@@ -26,6 +26,15 @@ enum NBEnvironment: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Which side of the Simulator window Notchboard docks to.
+enum NBDockEdge: String, CaseIterable, Identifiable, Codable {
+    case right = "RIGHT"
+    case left = "LEFT"
+
+    var id: String { rawValue }
+    var label: String { self == .right ? "Right edge" : "Left edge" }
+}
+
 enum NBFieldType: String, CaseIterable, Identifiable, Codable {
     case text, secret, number, bool, date, url, picker
 
