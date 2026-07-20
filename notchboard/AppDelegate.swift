@@ -16,6 +16,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Which "shape" the floating panel is currently showing. Only *transitions* between these
 /// (not every position update while following Simulator) get an animated resize — continuous
@@ -149,6 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fallbackMenuItem = fallbackItem
         menu.addItem(makeItem("Replay Onboarding…", #selector(replayOnboardingFromMenu), key: ""))
         menu.addItem(.separator())
+        menu.addItem(makeItem("Export Workspace…", #selector(exportWorkspaceFromMenu), key: ""))
+        menu.addItem(makeItem("Import Workspace…", #selector(importWorkspaceFromMenu), key: ""))
+        menu.addItem(.separator())
         menu.addItem(makeItem("Settings…", #selector(openSettingsFromMenu), key: ","))
         menu.addItem(.separator())
         menu.addItem(makeItem("Quit Notchboard", #selector(quitFromMenu), key: "q"))
@@ -187,6 +191,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitFromMenu() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func exportWorkspaceFromMenu() {
+        let data: Data
+        do {
+            data = try WorkspaceTransfer.exportData(viewModel.workspace)
+        } catch {
+            viewModel.toast("export failed — \(error.localizedDescription)", color: .red)
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "\(viewModel.workspace.name).notchboard.json"
+        panel.title = "Export Workspace"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+            viewModel.toast("workspace exported (secrets not included)", color: .green)
+        } catch {
+            viewModel.toast("export failed — \(error.localizedDescription)", color: .red)
+        }
+    }
+
+    @objc private func importWorkspaceFromMenu() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.title = "Import Workspace"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let workspace = try WorkspaceTransfer.importWorkspace(from: data)
+            viewModel.replaceWorkspace(with: workspace)
+        } catch {
+            viewModel.toast("import failed — not a valid workspace file", color: .red)
+        }
     }
 
     @objc private func openSettingsFromMenu() {

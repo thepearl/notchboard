@@ -521,6 +521,32 @@ final class NotchboardViewModel {
         toast("group “\(group.label)” deleted", color: .red)
     }
 
+    // MARK: - Actions: import/export
+
+    /// Replaces the whole catalogue with an imported one. Any secret values are freshly
+    /// stripped (an export shouldn't carry them, but never trust an external file) and the
+    /// active group is reset to a valid one.
+    func replaceWorkspace(with imported: NBWorkspace) {
+        var clean = imported
+        for (groupID, group) in imported.groups {
+            let secretKeys = group.fields.filter { $0.type == .secret }.map(\.key)
+            guard !secretKeys.isEmpty else { continue }
+            var group = group
+            for index in group.elements.indices {
+                for key in secretKeys where group.elements[index].values[key] != nil {
+                    group.elements[index].values[key] = ""
+                }
+            }
+            clean.groups[groupID] = group
+        }
+        workspace = clean
+        activeGroupID = clean.groupOrder.first ?? ""
+        currentView = .list
+        revealedFieldKeys = []
+        let count = clean.groups.values.reduce(0) { $0 + $1.elements.count }
+        toast("imported “\(clean.name)” · \(count) elements (secrets not included)", color: .green)
+    }
+
     private static func slug(_ text: String) -> String {
         text.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "_", options: .regularExpression)
     }
