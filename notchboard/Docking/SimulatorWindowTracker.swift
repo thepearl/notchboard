@@ -28,6 +28,10 @@ final class SimulatorWindowTracker {
 
     private var timer: Timer?
 
+    /// True while an AX read is in flight on a background task — skips further ticks so
+    /// reads never pile up behind a slow/hung Simulator process.
+    private var isReadingFrame = false
+
     func start(interval: TimeInterval = 0.35) {
         stop()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -67,12 +71,43 @@ final class SimulatorWindowTracker {
             return
         }
 
-        simulatorWindowFrame = Self.frontmostWindowFrame(forProcess: simulatorApp.processIdentifier)
+        // AX calls can block for seconds when the target process is busy or paused under a
+        // debugger — never make them from the main thread. NSScreen, conversely, must be
+        // read on the main thread, so the flip height is captured here and passed along.
+        guard !isReadingFrame else { return }
+        guard let screenHeight = Self.primaryScreenHeight else {
+            simulatorWindowFrame = nil
+            return
+        }
+        isReadingFrame = true
+        let pid = simulatorApp.processIdentifier
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let frame = Self.frontmostWindowFrame(forProcess: pid, primaryScreenHeight: screenHeight)
+            await MainActor.run {
+                guard let self else { return }
+                self.isReadingFrame = false
+                // A read that raced Simulator quitting (or permission being revoked) must
+                // not resurrect a stale frame.
+                if self.isSimulatorRunning {
+                    self.simulatorWindowFrame = frame
+                }
+            }
+        }
+    }
+
+    /// AX global coordinates are relative to the *primary* screen's top-left corner — the
+    /// screen whose AppKit frame origin is (0, 0). That is usually, but not contractually,
+    /// `screens.first`, and using another screen's height mis-docks the panel whenever
+    /// Simulator lives on a display of a different height.
+    private static var primaryScreenHeight: CGFloat? {
+        let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.screens.first
+        return primary?.frame.height
     }
 
     /// Reads the frontmost (or first) window's position + size for the given process via AX,
     /// converting from AX's top-left-origin coordinate space to AppKit's bottom-left-origin one.
-    private static func frontmostWindowFrame(forProcess pid: pid_t) -> CGRect? {
+    /// Runs off the main thread; everything it needs is passed in.
+    nonisolated private static func frontmostWindowFrame(forProcess pid: pid_t, primaryScreenHeight: CGFloat) -> CGRect? {
         let axApp = AXUIElementCreateApplication(pid)
 
         var windowsRef: CFTypeRef?
@@ -102,15 +137,13 @@ final class SimulatorWindowTracker {
             return nil
         }
 
-        guard let screenHeight = NSScreen.screens.first?.frame.height else { return nil }
-
-        // AX coordinates: origin is top-left of the main screen, y grows downward.
+        // AX coordinates: origin is top-left of the primary screen, y grows downward.
         // AppKit coordinates: origin is bottom-left, y grows upward.
-        let appKitY = screenHeight - origin.y - size.height
+        let appKitY = primaryScreenHeight - origin.y - size.height
         return CGRect(x: origin.x, y: appKitY, width: size.width, height: size.height)
     }
 
-    private static func axPoint(_ element: AXUIElement, _ attribute: String) -> CGPoint? {
+    nonisolated private static func axPoint(_ element: AXUIElement, _ attribute: String) -> CGPoint? {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
               let value = ref, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
@@ -119,7 +152,7 @@ final class SimulatorWindowTracker {
         return point
     }
 
-    private static func axSize(_ element: AXUIElement, _ attribute: String) -> CGSize? {
+    nonisolated private static func axSize(_ element: AXUIElement, _ attribute: String) -> CGSize? {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
               let value = ref, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
@@ -128,7 +161,7 @@ final class SimulatorWindowTracker {
         return size
     }
 
-    private static func axBool(_ element: AXUIElement, _ attribute: String) -> Bool? {
+    nonisolated private static func axBool(_ element: AXUIElement, _ attribute: String) -> Bool? {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
         return ref as? Bool
