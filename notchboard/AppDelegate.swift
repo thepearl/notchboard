@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setUpPanel()
         setUpStatusItem()
         installGlobalShortcuts()
+        Notifier.requestAuthorization()
 
         tracker.start()
 

@@ -36,6 +36,9 @@ final class NotchboardViewModel {
     var searchText: String = ""
     var tooltipElementID: String?
     var revealedFieldKeys: Set<String> = [] // key = "\(elementID).\(fieldKey)"
+    /// Elements the user asked to be pinged about when they become free. Cleared once the
+    /// notification fires. In-memory only — a watch doesn't outlive the session.
+    @ObservationIgnored private var watchedElementIDs: Set<String> = []
 
     // MARK: Add/edit-element form
     /// Non-nil while the add form is editing an existing element instead of creating one.
@@ -248,6 +251,7 @@ final class NotchboardViewModel {
             if claim.who == "you" {
                 group.elements[idx].claimedBy = nil
                 workspace.groups[activeGroupID] = group
+                didFreeElement(group.elements[idx])
                 toast("released “\(element.name)”", color: .green)
             } else {
                 toast("\(memberName(claim.who)) has this — ping them or claim anyway", color: .red)
@@ -273,7 +277,16 @@ final class NotchboardViewModel {
     }
 
     func notifyWhenFree(_ element: NBElement) {
+        watchedElementIDs.insert(element.id)
         toast("you'll be pinged when “\(element.name)” is free", color: .green)
+    }
+
+    /// Called whenever an element's claim is cleared (manual release or auto-release). If it
+    /// was being watched, fire a local notification and drop the watch.
+    private func didFreeElement(_ element: NBElement) {
+        guard watchedElementIDs.remove(element.id) != nil else { return }
+        Notifier.notifyElementFree(name: element.name)
+        toast("“\(element.name)” is now free", color: .green)
     }
 
     func copy(_ text: String, label: String, concealed: Bool = false) {
@@ -343,6 +356,7 @@ final class NotchboardViewModel {
                 guard let claim = group.elements[idx].claimedBy, claim.minutesAgo >= limit else { continue }
                 group.elements[idx].claimedBy = nil
                 changed = true
+                didFreeElement(group.elements[idx])
                 toast("auto-released “\(group.elements[idx].name)” after \(limit)m idle", color: .green)
             }
             if changed { workspace.groups[groupID] = group }
