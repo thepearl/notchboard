@@ -112,9 +112,7 @@ final class NotchboardViewModel {
     /// to fresh seed data instead of stranding (or crashing) the UI.
     func restore(from persisted: PersistedAppState) {
         var restored = persisted.workspace
-        restored.groupOrder.removeAll { restored.groups[$0] == nil }
-        let unordered = restored.groups.keys.filter { !restored.groupOrder.contains($0) }.sorted()
-        restored.groupOrder.append(contentsOf: unordered)
+        restored.reconcileGroupOrder()
         if restored.groups.isEmpty {
             restored = MockData.workspace()
         }
@@ -207,7 +205,10 @@ final class NotchboardViewModel {
     func openEdit(_ element: NBElement) {
         editingElementID = element.id
         addName = element.name
-        addEnvironment = element.env == .all ? .dev : element.env
+        // Preserve the element's env exactly (including .all) rather than coercing to .dev —
+        // saveElement writes this back, so a coercion here would silently mutate the env of
+        // any element edited for an unrelated reason.
+        addEnvironment = element.env
         addNote = element.note
         addValues = element.values
         currentView = .add
@@ -369,17 +370,20 @@ final class NotchboardViewModel {
         }
         guard let encoded = username.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return }
 
-        // Logging in as this account is de facto using it — auto-claim if free (vision §5.3).
-        if element.claimedBy == nil {
-            mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
-        }
-
+        let wasFree = element.claimedBy == nil
         SimctlBridge.openURL("\(scheme)://debug/login?user=\(encoded)") { [weak self] failure in
+            guard let self else { return }
             if let failure {
-                self?.toast(failure.userMessage, color: .red)
-            } else {
-                self?.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
+                // The deeplink never fired — don't leave the element falsely claimed.
+                self.toast(failure.userMessage, color: .red)
+                return
             }
+            // Logging in as this account is de facto using it — auto-claim if it was free
+            // (vision §5.3), but only now that the deeplink actually succeeded.
+            if wasFree, self.selectedElement(id: element.id)?.claimedBy == nil {
+                self.mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
+            }
+            self.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
         }
     }
 
@@ -389,7 +393,11 @@ final class NotchboardViewModel {
             guard var group = workspace.groups[groupID] else { continue }
             var changed = false
             for idx in group.elements.indices {
-                guard let claim = group.elements[idx].claimedBy, claim.minutesAgo >= limit else { continue }
+                // Only auto-release your own idle claims — the manual path already refuses to
+                // release someone else's, and other members' claim ages are simulated/frozen
+                // in this local build, so sweeping them would be meaningless churn.
+                guard let claim = group.elements[idx].claimedBy,
+                      claim.who == "you", claim.minutesAgo >= limit else { continue }
                 group.elements[idx].claimedBy = nil
                 changed = true
                 didFreeElement(group.elements[idx])
@@ -449,10 +457,11 @@ final class NotchboardViewModel {
 
         // The persisted JSON only ever held placeholders; the real secret values live in
         // the Keychain and must be cleaned up with the element.
-        for field in group.fields where field.type == .secret {
-            SecretsStore.delete(for: "\(element.id).\(field.key)")
+        for key in group.secretFieldKeys {
+            SecretsStore.delete(for: "\(element.id).\(key)")
         }
         revealedFieldKeys = revealedFieldKeys.filter { !$0.hasPrefix("\(elementID).") }
+        watchedElementIDs.remove(elementID)
 
         currentView = .list
         toast("“\(element.name)” deleted", color: .red)
@@ -530,15 +539,20 @@ final class NotchboardViewModel {
             return
         }
 
+        // A field that was a secret but is no longer one in the new schema — whether it was
+        // removed OR retyped to a non-secret type — must have its value dropped and its
+        // Keychain entry deleted. Otherwise the previously-protected value would survive in
+        // memory and get written to state.json in cleartext on the next save.
         let keptKeys = Set(fields.map(\.key))
-        let removedSecretKeys = group.fields
-            .filter { $0.type == .secret && !keptKeys.contains($0.key) }
-            .map(\.key)
+        let newSecretKeys = Set(fields.filter { $0.type == .secret }.map(\.key))
+        let clearedSecretKeys = Set(group.secretFieldKeys).subtracting(newSecretKeys)
         for idx in group.elements.indices {
-            group.elements[idx].values = group.elements[idx].values.filter { keptKeys.contains($0.key) }
+            group.elements[idx].values = group.elements[idx].values.filter {
+                keptKeys.contains($0.key) && !clearedSecretKeys.contains($0.key)
+            }
         }
         for element in group.elements {
-            for key in removedSecretKeys {
+            for key in clearedSecretKeys {
                 SecretsStore.delete(for: "\(element.id).\(key)")
             }
         }
@@ -556,9 +570,9 @@ final class NotchboardViewModel {
 
     func deleteGroup(_ groupID: String) {
         guard let group = workspace.groups[groupID] else { return }
-        for field in group.fields where field.type == .secret {
+        for key in group.secretFieldKeys {
             for element in group.elements {
-                SecretsStore.delete(for: "\(element.id).\(field.key)")
+                SecretsStore.delete(for: "\(element.id).\(key)")
             }
         }
         workspace.groups.removeValue(forKey: groupID)
@@ -574,12 +588,17 @@ final class NotchboardViewModel {
     // MARK: - Actions: import/export
 
     /// Replaces the whole catalogue with an imported one. Any secret values are freshly
-    /// stripped (an export shouldn't carry them, but never trust an external file) and the
-    /// active group is reset to a valid one.
+    /// stripped (an export shouldn't carry them, but never trust an external file), the
+    /// group order is reconciled so a malformed file can't strand the UI, and the discarded
+    /// workspace's Keychain secrets are purged so they don't linger unreachable.
     func replaceWorkspace(with imported: NBWorkspace) {
+        for key in workspace.allSecretKeychainKeys {
+            SecretsStore.delete(for: key)
+        }
+
         var clean = imported
         for (groupID, group) in imported.groups {
-            let secretKeys = group.fields.filter { $0.type == .secret }.map(\.key)
+            let secretKeys = group.secretFieldKeys
             guard !secretKeys.isEmpty else { continue }
             var group = group
             for index in group.elements.indices {
@@ -589,10 +608,13 @@ final class NotchboardViewModel {
             }
             clean.groups[groupID] = group
         }
+        clean.reconcileGroupOrder()
         workspace = clean
         activeGroupID = clean.groupOrder.first ?? ""
         currentView = .list
         revealedFieldKeys = []
+        keyboardSelectionID = nil
+        watchedElementIDs = []
         let count = clean.groups.values.reduce(0) { $0 + $1.elements.count }
         toast("imported “\(clean.name)” · \(count) elements (secrets not included)", color: .green)
     }

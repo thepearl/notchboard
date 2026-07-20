@@ -34,7 +34,10 @@ enum SimctlBridge {
 
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
-        process.standardOutput = Pipe()
+        // Discard stdout rather than piping it: an undrained pipe that fills its ~64KB
+        // buffer would block the child and hang the termination handler. simctl's stdout
+        // isn't needed anyway.
+        process.standardOutput = FileHandle.nullDevice
 
         process.terminationHandler = { finished in
             let errorData = stderrPipe.fileHandleForReading.readDataToEndOfFile()

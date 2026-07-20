@@ -142,6 +142,12 @@ struct NBGroup: Identifiable, Codable, Equatable {
     var secondaryKey: String
     var fields: [NBField]
     var elements: [NBElement]
+
+    /// The single source of truth for "which of this group's fields hold secrets" — used by
+    /// persistence, export, and CRUD cleanup so the rule lives in one place.
+    var secretFieldKeys: [String] {
+        fields.filter { $0.type == .secret }.map(\.key)
+    }
 }
 
 struct NBWorkspace: Codable, Equatable {
@@ -150,4 +156,24 @@ struct NBWorkspace: Codable, Equatable {
     var groups: [String: NBGroup]
     var members: [String: NBMember]
     var onlineCount: Int
+
+    /// Drops group ids in `groupOrder` that no longer exist and appends any groups missing
+    /// from the order (sorted, for determinism), so the ordered tabs and the group map can't
+    /// drift and strand the UI. Persisted/imported workspaces are user-editable, so every
+    /// entry point that ingests one runs this.
+    mutating func reconcileGroupOrder() {
+        groupOrder.removeAll { groups[$0] == nil }
+        let unordered = groups.keys.filter { !groupOrder.contains($0) }.sorted()
+        groupOrder.append(contentsOf: unordered)
+    }
+
+    /// Every Keychain account key ("<elementID>.<fieldKey>") for secret values in this
+    /// workspace — used to purge secrets when a workspace is discarded.
+    var allSecretKeychainKeys: [String] {
+        groups.values.flatMap { group in
+            group.secretFieldKeys.flatMap { key in
+                group.elements.map { "\($0.id).\(key)" }
+            }
+        }
+    }
 }

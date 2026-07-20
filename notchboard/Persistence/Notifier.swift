@@ -14,9 +14,18 @@ import os
 enum Notifier {
     private static let logger = Logger(subsystem: "flourix.notchboard", category: "notifications")
 
+    /// UNUserNotificationCenter.current() raises an uncatchable exception when there's no
+    /// valid app bundle (e.g. run via `swift run` or a broken/adhoc bundle). Gate every
+    /// entry on a real bundle id so those contexts degrade to no-notifications instead of
+    /// crashing at launch.
+    private static var isAvailable: Bool {
+        Bundle.main.bundleIdentifier != nil
+    }
+
     /// Asks for notification permission once (no-op if already decided). Safe to call at
     /// launch; the system only shows the prompt the first time.
     static func requestAuthorization() {
+        guard isAvailable else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
                 logger.error("authorization request failed: \(error.localizedDescription)")
@@ -29,6 +38,7 @@ enum Notifier {
     /// Posts an immediate local notification. Silently does nothing if the user declined
     /// permission — the in-app toast still fires, so the feature degrades gracefully.
     static func notifyElementFree(name: String) {
+        guard isAvailable else { return }
         let content = UNMutableNotificationContent()
         content.title = "Now free: \(name)"
         content.body = "The element you were watching is available to claim."

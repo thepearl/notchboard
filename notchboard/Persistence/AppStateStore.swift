@@ -139,16 +139,12 @@ enum AppStateStore {
 
     // MARK: - Secret field handling
 
-    private static func secretKeys(of group: NBGroup) -> [String] {
-        group.fields.filter { $0.type == .secret }.map(\.key)
-    }
-
     /// Moves every secret-typed value into the Keychain and leaves a placeholder in the
     /// returned workspace, so the JSON on disk never contains a secret.
     private static func strippingSecrets(from workspace: NBWorkspace) -> NBWorkspace {
         var stripped = workspace
         for (groupID, group) in workspace.groups {
-            let secretKeys = secretKeys(of: group)
+            let secretKeys = group.secretFieldKeys
             guard !secretKeys.isEmpty else { continue }
             var group = group
             for index in group.elements.indices {
@@ -169,7 +165,7 @@ enum AppStateStore {
     private static func restoringSecrets(into workspace: NBWorkspace) -> NBWorkspace {
         var restored = workspace
         for (groupID, group) in workspace.groups {
-            let secretKeys = secretKeys(of: group)
+            let secretKeys = group.secretFieldKeys
             guard !secretKeys.isEmpty else { continue }
             var group = group
             for index in group.elements.indices {

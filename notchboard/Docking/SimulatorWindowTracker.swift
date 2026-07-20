@@ -86,11 +86,15 @@ final class SimulatorWindowTracker {
             await MainActor.run {
                 guard let self else { return }
                 self.isReadingFrame = false
-                // A read that raced Simulator quitting (or permission being revoked) must
-                // not resurrect a stale frame.
-                if self.isSimulatorRunning {
-                    self.simulatorWindowFrame = frame
-                }
+                // A read that raced Simulator quitting, being hidden/minimized, or having
+                // permission revoked must not resurrect a stale frame. Re-check the same
+                // conditions poll() gates on, against current state.
+                guard self.isSimulatorRunning,
+                      let app = NSWorkspace.shared.runningApplications.first(where: {
+                          $0.processIdentifier == pid
+                      }),
+                      !app.isHidden else { return }
+                self.simulatorWindowFrame = frame
             }
         }
     }

@@ -34,7 +34,7 @@ enum WorkspaceTransfer {
     static func exportData(_ workspace: NBWorkspace) throws -> Data {
         var stripped = workspace
         for (groupID, group) in workspace.groups {
-            let secretKeys = group.fields.filter { $0.type == .secret }.map(\.key)
+            let secretKeys = group.secretFieldKeys
             guard !secretKeys.isEmpty else { continue }
             var group = group
             for index in group.elements.indices {
@@ -57,9 +57,7 @@ enum WorkspaceTransfer {
         }
         var workspace = file.workspace
         guard !workspace.groups.isEmpty else { throw ImportError.emptyWorkspace }
-        workspace.groupOrder.removeAll { workspace.groups[$0] == nil }
-        let unordered = workspace.groups.keys.filter { !workspace.groupOrder.contains($0) }.sorted()
-        workspace.groupOrder.append(contentsOf: unordered)
+        workspace.reconcileGroupOrder()
         return workspace
     }
 }
