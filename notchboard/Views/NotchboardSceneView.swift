@@ -61,7 +61,9 @@ struct NotchboardSceneView: View {
             onboardingCompleted: !onboarding.isPresented,
             onboardingName: onboarding.name
         )
-        AppStateStore.save(state)
+        // Debounced — bursts of mutations coalesce into one write. AppDelegate flushes a
+        // final immediate save on termination.
+        AppStateStore.scheduleSave(state)
     }
 
     /// A cheap discriminator so `.animation(value:)` only fires a crossfade on genuine

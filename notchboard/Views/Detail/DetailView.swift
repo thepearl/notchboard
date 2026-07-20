@@ -78,7 +78,13 @@ struct DetailView: View {
                     isSecret: field.type == .secret,
                     isRevealed: viewModel.isRevealed(elementID: element.id, fieldKey: field.key),
                     onReveal: { viewModel.toggleReveal(elementID: element.id, fieldKey: field.key) },
-                    onCopy: { viewModel.copy(element.values[field.key] ?? "", label: field.label) }
+                    onCopy: {
+                        viewModel.copy(
+                            element.values[field.key] ?? "",
+                            label: field.label,
+                            concealed: field.type == .secret
+                        )
+                    }
                 )
             }
 

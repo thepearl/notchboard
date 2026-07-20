@@ -57,8 +57,7 @@ struct ElementRowView: View {
                 .overlay(RoundedRectangle(cornerRadius: 3).stroke(element.env.color.opacity(0.35), lineWidth: 1))
 
             Button {
-                let key = viewModel.activeGroup.fields.first?.key ?? ""
-                viewModel.copy(element.values[key] ?? element.name, label: viewModel.activeGroup.fields.first?.label ?? "value")
+                viewModel.copyPrimaryField(of: element)
             } label: {
                 Text("⧉")
                     .font(NBFont.mono(9))

@@ -73,6 +73,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         repositionTimer?.invalidate()
         tracker.stop()
+
+        // Saves are normally debounced (see NotchboardSceneView.persist); flush a final
+        // immediate write so the last half-second of changes isn't lost on quit.
+        AppStateStore.save(viewModel.persistableState(
+            onboardingCompleted: !onboarding.isPresented,
+            onboardingName: onboarding.name
+        ))
     }
 
     // MARK: - Setup

@@ -209,7 +209,7 @@ final class NotchboardViewModel {
         } else {
             group.elements[idx].claimedBy = NBClaim(who: "you", minutesAgo: 0)
             workspace.groups[activeGroupID] = group
-            copy(element.values[activeGroup.fields.first?.key ?? ""] ?? element.name, label: activeGroup.fields.first?.label ?? "value")
+            copyPrimaryField(of: element)
         }
     }
 
@@ -230,12 +230,29 @@ final class NotchboardViewModel {
         toast("you'll be pinged when “\(element.name)” is free", color: .green)
     }
 
-    func copy(_ text: String, label: String) {
+    func copy(_ text: String, label: String, concealed: Bool = false) {
         #if canImport(AppKit)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        if concealed {
+            // Standard hint (nspasteboard.org) telling clipboard managers not to record
+            // this entry — used for secret-typed field values.
+            pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        }
         #endif
         toast("\(label) copied to clipboard", color: .amber)
+    }
+
+    /// Copies an element's primary (first schema) field — the row copy button and the
+    /// claim-and-copy flow share this so the "what is primary" logic lives in one place.
+    func copyPrimaryField(of element: NBElement) {
+        let field = activeGroup.fields.first
+        copy(
+            element.values[field?.key ?? ""] ?? element.name,
+            label: field?.label ?? "value",
+            concealed: field?.type == .secret
+        )
     }
 
     private func mutate(_ elementID: String, _ change: (inout NBElement) -> Void) {
