@@ -63,6 +63,20 @@ final class NotchboardViewModel {
     /// grabs focus. A counter (rather than a bool) so repeated presses always re-trigger it.
     var searchFocusToken: Int = 0
 
+    /// Periodically frees claims older than `autoReleaseMinutes` (the behaviour the
+    /// Settings surface advertises). 30s granularity is plenty for a minutes-based limit.
+    @ObservationIgnored private var autoReleaseTimer: Timer?
+
+    init() {
+        autoReleaseTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.releaseExpiredClaims()
+        }
+    }
+
+    deinit {
+        autoReleaseTimer?.invalidate()
+    }
+
     /// Builds a snapshot of everything worth persisting between launches.
     func persistableState(onboardingCompleted: Bool, onboardingName: String) -> PersistedAppState {
         PersistedAppState(
@@ -207,7 +221,7 @@ final class NotchboardViewModel {
                 toast("\(memberName(claim.who)) has this — ping them or claim anyway", color: .red)
             }
         } else {
-            group.elements[idx].claimedBy = NBClaim(who: "you", minutesAgo: 0)
+            group.elements[idx].claimedBy = NBClaim(who: "you")
             workspace.groups[activeGroupID] = group
             copyPrimaryField(of: element)
         }
@@ -253,6 +267,21 @@ final class NotchboardViewModel {
             label: field?.label ?? "value",
             concealed: field?.type == .secret
         )
+    }
+
+    private func releaseExpiredClaims() {
+        let limit = autoReleaseMinutes
+        for groupID in workspace.groupOrder {
+            guard var group = workspace.groups[groupID] else { continue }
+            var changed = false
+            for idx in group.elements.indices {
+                guard let claim = group.elements[idx].claimedBy, claim.minutesAgo >= limit else { continue }
+                group.elements[idx].claimedBy = nil
+                changed = true
+                toast("auto-released “\(group.elements[idx].name)” after \(limit)m idle", color: .green)
+            }
+            if changed { workspace.groups[groupID] = group }
+        }
     }
 
     private func mutate(_ elementID: String, _ change: (inout NBElement) -> Void) {

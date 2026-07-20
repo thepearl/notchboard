@@ -73,7 +73,44 @@ struct NBMember: Identifiable, Codable, Equatable {
 
 struct NBClaim: Codable, Equatable {
     var who: String   // member id, or "you"
-    var minutesAgo: Int
+    var claimedAt: Date
+
+    /// Live age of the claim — drives the "claimed Xm ago" labels and auto-release.
+    var minutesAgo: Int {
+        max(0, Int(Date().timeIntervalSince(claimedAt) / 60))
+    }
+
+    init(who: String, claimedAt: Date = Date()) {
+        self.who = who
+        self.claimedAt = claimedAt
+    }
+
+    /// Convenience for seed/mock data expressed as "claimed N minutes ago".
+    init(who: String, minutesAgo: Int) {
+        self.init(who: who, claimedAt: Date().addingTimeInterval(TimeInterval(-minutesAgo * 60)))
+    }
+
+    // Custom decoding keeps pre-claimedAt state files (which stored minutesAgo) loadable.
+    private enum CodingKeys: String, CodingKey {
+        case who, claimedAt, minutesAgo
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        who = try container.decode(String.self, forKey: .who)
+        if let date = try container.decodeIfPresent(Date.self, forKey: .claimedAt) {
+            claimedAt = date
+        } else {
+            let legacyMinutes = try container.decodeIfPresent(Int.self, forKey: .minutesAgo) ?? 0
+            claimedAt = Date().addingTimeInterval(TimeInterval(-legacyMinutes * 60))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(who, forKey: .who)
+        try container.encode(claimedAt, forKey: .claimedAt)
+    }
 }
 
 struct NBElement: Identifiable, Codable, Equatable {

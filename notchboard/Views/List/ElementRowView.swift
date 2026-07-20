@@ -41,7 +41,7 @@ struct ElementRowView: View {
                     who: viewModel.memberName(claim.who),
                     minutesAgo: claim.minutesAgo,
                     envLabel: element.env.rawValue.lowercased(),
-                    autoReleaseIn: max(1, viewModel.autoReleaseMinutes - claim.minutesAgo),
+                    autoReleaseIn: max(0, viewModel.autoReleaseMinutes - claim.minutesAgo),
                     isShowingTip: viewModel.tooltipElementID == element.id,
                     onEnter: { viewModel.tooltipElementID = element.id },
                     onLeave: { viewModel.tooltipElementID = nil },
