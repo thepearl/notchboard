@@ -58,11 +58,17 @@ Other modules:
 - Small files organised by feature. Match the existing comment style: file headers explain the why and link to vision.md sections.
 - Commit format: `<type>: <description>` (feat, fix, refactor, docs, test, chore, perf, ci).
 
-## Known issues (audited 2026-07-20, critical and medium findings fixed the same day)
+## Feature set (as of 2026-07-20)
 
-- `NotchboardViewModel` is a god object (chrome, data, navigation, forms, toasts, settings in one class). Decompose before backend work, ideally together with adding the test target.
+Beyond the docking shell and catalogue, the following are implemented locally (no backend): full CRUD (edit/delete elements, edit/rename/delete groups with schema editing that preserves values via stable field ids), the `simctl` deeplink bridge ("login on sim" with a configurable URL scheme in Settings), a menu-bar fallback that shows the panel undocked when Simulator/Accessibility is unavailable, workspace export/import as JSON (secrets stripped), local notify-when-free notifications, keyboard navigation in the list, launch-at-login, and a left/right dock-edge setting.
+
+Secret values are the one thing never written to `state.json` or an export: they live in the Keychain. `NBGroup.secretFieldKeys` is the single definition of which fields are secret; changing a field away from the secret type drops its value and Keychain entry.
+
+## Known issues (post-review 2026-07-20 — the high/medium correctness findings are fixed)
+
+- `NotchboardViewModel` is a god object (chrome, data, navigation, forms, toasts, settings, ~650 lines). Decompose before backend work, ideally with the test target.
 - No test target, no SwiftLint/SwiftFormat config, no CI, no README.
 - Claim-age labels update on re-render (the 30s auto-release sweep triggers them), not on a per-minute tick of their own.
-- "Login on sim" and its caption are still gated on `group.id == "users"` (acceptable while it's a phase-3 stub).
+- `secondaryText` still special-cases `group.id == "promos"`/`"products"` for row subtitles (guarded on the fields existing). Known debt; the login button was made schema-driven.
+- If `state.json` reaches a machine without the matching Keychain, secret fields load empty and the next save persists them empty (no cross-machine secret sync by design in this local build).
 - Dead code flagged by the audit: `replayOnboarding()`, `NBMetrics.simulatorWidth/Height`, the unused member-avatar model (`short`, `avatarColor`, `initials`).
-- `print` → `os.Logger` migration done in Persistence; check any new code uses `Logger`.
