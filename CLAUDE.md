@@ -23,7 +23,7 @@ To exercise docking at runtime you need Simulator.app running and the Accessibil
 - `ENABLE_APP_SANDBOX = NO` in both configurations. A sandboxed process's Accessibility calls against other processes are silently swallowed. No permission dialog ever appears and there is no error. This cost real debugging time (vision.md §13.3). Never re-enable it.
 - `FloatingPanel` is a borderless `.nonactivatingPanel` that overrides `canBecomeKey`. This is what lets text fields work without the app ever stealing focus from Simulator or Xcode. Changing the style mask or activation policy breaks the core UX.
 - The app runs as an agent via `NSApp.setActivationPolicy(.accessory)` in `AppDelegate` (not `LSUIElement` in Info.plist — the Info.plist is generated, `GENERATE_INFOPLIST_FILE = YES`).
-- Accessibility API coordinates are top-left origin. AppKit is bottom-left origin. The conversion lives in `Docking/SimulatorWindowTracker.swift` and currently assumes `NSScreen.screens.first` is the primary screen (a known multi-monitor limitation).
+- Accessibility API coordinates are top-left origin relative to the primary screen (the one whose AppKit frame origin is zero). AppKit is bottom-left origin. The conversion lives in `Docking/SimulatorWindowTracker.swift`. AX reads run on a background task because they can block for seconds when Simulator is busy. NSScreen reads stay on the main thread.
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on. Everything is main-actor by default. Be explicit when moving work off the main actor.
 - Deployment target macOS 26.3, Swift 5 mode, hardened runtime on, no entitlements file.
 
@@ -45,7 +45,7 @@ State lives in three `@Observable` classes, injected into views as `@Bindable`:
 Other modules:
 
 - `Models/Models.swift` — Codable value types (`NBWorkspace` → `NBGroup` → `NBElement`, schema-driven `values: [String: String]`). `Models/MockData.swift` seeds first launch.
-- `Persistence/AppStateStore.swift` — whole app state as one JSON file at `~/Library/Application Support/Notchboard/state.json`. Saved from `NotchboardSceneView`'s `.onChange` handlers. Delete that file to simulate a first launch.
+- `Persistence/AppStateStore.swift` — whole app state as one versioned JSON file at `~/Library/Application Support/Notchboard/state.json`, saved debounced from `NotchboardSceneView`'s `.onChange` handlers and flushed on quit. Secret-typed field values never enter the JSON: `SecretsStore` swaps them into the Keychain (service `flourix.notchboard.secrets`) on save and back on load. Delete the state file to simulate a first launch. A corrupt file is moved to `state.json.corrupt`, not discarded.
 - `DesignSystem/` — `NBColor`, `NBFont`, `NBMetrics`. The visual direction ("dev-tool carbon", vision.md §7) is locked. Always use these constants, never raw hex or font literals in views.
 - `Views/` — one folder per feature (Notch, Panel, List, Detail, Add, NewGroup, Onboarding, Settings, Toast).
 
@@ -58,12 +58,11 @@ Other modules:
 - Small files organised by feature. Match the existing comment style: file headers explain the why and link to vision.md sections.
 - Commit format: `<type>: <description>` (feat, fix, refactor, docs, test, chore, perf, ci).
 
-## Known issues (audited 2026-07-20, fix before building on top)
+## Known issues (audited 2026-07-20, critical and medium findings fixed the same day)
 
-- Crash risk: `NotchboardViewModel.activeGroup` force-unwraps and traps if persisted state has an empty or inconsistent `groups`/`groupOrder` (user-editable JSON reaches this path).
-- Secret-typed field values persist in plaintext to `state.json` and are copied to the pasteboard without the concealed-type marker. Real fix is Keychain plus `org.nspasteboard.ConcealedType`.
-- `PersistedAppState` has no schema version. Any model change silently resets user data to mock.
-- Auto-release of claims is advertised in Settings but not implemented, and claim-age counters never tick.
-- Every mutation re-encodes and rewrites the whole state file on the main thread with no debounce.
-- Element IDs use millisecond timestamps (collision-prone). Use UUIDs.
-- No `.gitignore`, no tests, no lint config, no CI.
+- `NotchboardViewModel` is a god object (chrome, data, navigation, forms, toasts, settings in one class). Decompose before backend work, ideally together with adding the test target.
+- No test target, no SwiftLint/SwiftFormat config, no CI, no README.
+- Claim-age labels update on re-render (the 30s auto-release sweep triggers them), not on a per-minute tick of their own.
+- "Login on sim" and its caption are still gated on `group.id == "users"` (acceptable while it's a phase-3 stub).
+- Dead code flagged by the audit: `replayOnboarding()`, `NBMetrics.simulatorWidth/Height`, the unused member-avatar model (`short`, `avatarColor`, `initials`).
+- `print` → `os.Logger` migration done in Persistence; check any new code uses `Logger`.

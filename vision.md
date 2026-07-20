@@ -304,6 +304,17 @@ vs. still vision."
   onboarding — this was a real bug we hit and fixed: validation-error toasts were being created
   but never rendered while the onboarding dialog was up, which looked like "nothing happens" when
   clicking a button that should have shown an error).
+- **Hardening pass (2026-07-20, post-audit).** Secret-typed field values are stored in the
+  Keychain (`SecretsStore`) and never written to `state.json`; copying a secret marks the
+  pasteboard with `org.nspasteboard.ConcealedType`. Persisted state carries a schema version,
+  decodes settings leniently, is saved debounced (flushed on quit), and a corrupt file is backed
+  up rather than silently discarded. `activeGroup` no longer force-unwraps, and restored state is
+  sanitised (`groupOrder`/`groups` reconciled) so a hand-edited state file can't crash the app.
+  **Claim auto-release is real**: claims store a `claimedAt` date, ages tick live, and a 30s
+  sweep releases claims older than the configured `autoReleaseMinutes`. AX reads run off the
+  main thread (a busy Simulator can't freeze the UI) and the top-left→bottom-left coordinate
+  flip uses the true primary screen, fixing docking when Simulator lives on a secondary display
+  of a different height.
 
 ### 13.2 Deliberate simplifications / known gaps (still local-only)
 
@@ -315,13 +326,12 @@ vs. still vision."
 - **No menu-bar fallback.** If Accessibility is denied, the panel currently just won't find
   Simulator and will stay hidden; there's no alternate menu-bar-icon presentation yet (flagged as
   an explicit open item in both the explorations doc and §9/§12 above).
-- **Single-screen assumption.** `SimulatorWindowTracker`/`AppDelegate` use `NSScreen.screens.first`
-  for coordinate conversion; multi-monitor setups where Simulator lives on a secondary display
-  aren't specifically handled yet.
 - **Polling, not event-driven.** Both the Simulator tracker and the panel's reposition loop use
   `Timer` polling (~3–7x/sec) rather than `AXObserver` notifications or `NSWorkspace` run/terminate
   notifications. Simpler to implement and fast enough to feel live, but a real AXObserver-based
-  approach would be more efficient and is a reasonable follow-up.
+  approach would be more efficient and is a reasonable follow-up. (The AX reads themselves now run
+  off the main thread, and the multi-monitor coordinate conversion was fixed in the 2026-07-20
+  hardening pass — see §13.1.)
 - **Onboarding "join workspace" step is cosmetic.** Any code ≥6 characters shows a fake
   "found acme-mobile" card; there's no real invite-code backend yet (this matches vision §8's
   phase-1 scope, just noting it's still fully mocked).
