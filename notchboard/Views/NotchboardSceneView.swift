@@ -52,6 +52,7 @@ struct NotchboardSceneView: View {
         .onChange(of: viewModel.autoReleaseMinutes) { persist() }
         .onChange(of: viewModel.startExpanded) { persist() }
         .onChange(of: viewModel.liveSyncEnabled) { persist() }
+        .onChange(of: viewModel.deeplinkScheme) { persist() }
         .onChange(of: onboarding.isPresented) { persist() }
         .onChange(of: onboarding.name) { persist() }
     }

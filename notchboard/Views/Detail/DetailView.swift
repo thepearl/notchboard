@@ -156,9 +156,9 @@ struct DetailView: View {
                 }
                 .buttonStyle(.plain)
 
-                if group.id == "users" {
+                if viewModel.loginUsername(for: element) != nil {
                     Button {
-                        viewModel.toast("deeplink fired → simulator (phase 3 — not yet wired)", color: .amber)
+                        viewModel.loginOnSim(element)
                     } label: {
                         Text("⚡ login on sim")
                             .font(NBFont.ui(11))
@@ -171,8 +171,10 @@ struct DetailView: View {
                 }
             }
 
-            if group.id == "users" {
-                Text("fires brewly://debug/login deeplink · phase 3")
+            if viewModel.loginUsername(for: element) != nil {
+                Text(viewModel.deeplinkScheme.isEmpty
+                     ? "set a URL scheme in settings to enable deeplinks"
+                     : "fires \(viewModel.deeplinkScheme)://debug/login?user=…")
                     .font(NBFont.mono(8))
                     .foregroundStyle(NBColor.textMuted)
             }

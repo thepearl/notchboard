@@ -26,6 +26,7 @@ struct PersistedAppState: Codable, Equatable {
     var autoReleaseMinutes: Int
     var startExpanded: Bool
     var liveSyncEnabled: Bool
+    var deeplinkScheme: String
     var onboardingCompleted: Bool
     var onboardingName: String
 
@@ -34,6 +35,7 @@ struct PersistedAppState: Codable, Equatable {
         autoReleaseMinutes: Int,
         startExpanded: Bool,
         liveSyncEnabled: Bool,
+        deeplinkScheme: String,
         onboardingCompleted: Bool,
         onboardingName: String
     ) {
@@ -42,6 +44,7 @@ struct PersistedAppState: Codable, Equatable {
         self.autoReleaseMinutes = autoReleaseMinutes
         self.startExpanded = startExpanded
         self.liveSyncEnabled = liveSyncEnabled
+        self.deeplinkScheme = deeplinkScheme
         self.onboardingCompleted = onboardingCompleted
         self.onboardingName = onboardingName
     }
@@ -56,6 +59,7 @@ struct PersistedAppState: Codable, Equatable {
         autoReleaseMinutes = try container.decodeIfPresent(Int.self, forKey: .autoReleaseMinutes) ?? 60
         startExpanded = try container.decodeIfPresent(Bool.self, forKey: .startExpanded) ?? true
         liveSyncEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveSyncEnabled) ?? true
+        deeplinkScheme = try container.decodeIfPresent(String.self, forKey: .deeplinkScheme) ?? ""
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
         onboardingName = try container.decodeIfPresent(String.self, forKey: .onboardingName) ?? ""
     }

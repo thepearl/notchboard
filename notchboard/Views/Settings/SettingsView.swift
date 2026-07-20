@@ -27,6 +27,15 @@ struct SettingsView: View {
             }
 
             Section {
+                TextField("Debug URL scheme", text: $viewModel.deeplinkScheme, prompt: Text("e.g. brewly"))
+            } header: {
+                Text("Simulator deeplink")
+            } footer: {
+                Text("“Login on sim” fires <scheme>://debug/login?user=<username> into the booted Simulator via xcrun simctl. Your app's debug build must register this URL scheme and handle that route.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Button("Replay Onboarding…", action: onReplayOnboarding)
             } footer: {
                 Text("Notchboard docks to the real iOS Simulator window via the macOS Accessibility API. It hides automatically when Simulator quits, is closed, or is minimized/hidden, and redocks the moment it's visible again.")

@@ -61,6 +61,9 @@ final class NotchboardViewModel {
     var autoReleaseMinutes: Int = 60
     var startExpanded: Bool = true
     var liveSyncEnabled: Bool = true
+    /// The target app's debug URL scheme for "login on sim" — e.g. "brewly" fires
+    /// brewly://debug/login?user=…. Empty means the deeplink bridge is unconfigured.
+    var deeplinkScheme: String = ""
 
     // MARK: Global shortcuts (⌘K / ⌘N — see AppDelegate's global NSEvent monitor)
     /// Bumped whenever the global ⌘K shortcut fires; the search field observes this and
@@ -88,6 +91,7 @@ final class NotchboardViewModel {
             autoReleaseMinutes: autoReleaseMinutes,
             startExpanded: startExpanded,
             liveSyncEnabled: liveSyncEnabled,
+            deeplinkScheme: deeplinkScheme,
             onboardingCompleted: onboardingCompleted,
             onboardingName: onboardingName
         )
@@ -113,6 +117,7 @@ final class NotchboardViewModel {
         autoReleaseMinutes = persisted.autoReleaseMinutes
         startExpanded = persisted.startExpanded
         liveSyncEnabled = persisted.liveSyncEnabled
+        deeplinkScheme = persisted.deeplinkScheme
         isExpanded = persisted.startExpanded
     }
 
@@ -294,6 +299,39 @@ final class NotchboardViewModel {
             label: field?.label ?? "value",
             concealed: field?.type == .secret
         )
+    }
+
+    // MARK: - Actions: deeplink bridge ("login on sim")
+
+    /// The username to fire in the debug-login deeplink, or nil when this element can't
+    /// log in (schema has no username field, or the value is empty). Schema-driven — any
+    /// group whose elements carry a "username" gets the button, not just the seed "users".
+    func loginUsername(for element: NBElement) -> String? {
+        guard let username = element.values["username"], !username.isEmpty else { return nil }
+        return username
+    }
+
+    func loginOnSim(_ element: NBElement) {
+        guard let username = loginUsername(for: element) else { return }
+        let scheme = deeplinkScheme.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !scheme.isEmpty else {
+            toast("set your app's debug URL scheme in settings first", color: .red)
+            return
+        }
+        guard let encoded = username.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return }
+
+        // Logging in as this account is de facto using it — auto-claim if free (vision §5.3).
+        if element.claimedBy == nil {
+            mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
+        }
+
+        SimctlBridge.openURL("\(scheme)://debug/login?user=\(encoded)") { [weak self] failure in
+            if let failure {
+                self?.toast(failure.userMessage, color: .red)
+            } else {
+                self?.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
+            }
+        }
     }
 
     private func releaseExpiredClaims() {
