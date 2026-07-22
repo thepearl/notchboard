@@ -361,6 +361,21 @@ final class NotchboardViewModel {
         return username
     }
 
+    /// The password for an auth element: the value of the group's first secret-typed field.
+    /// Read in-memory (real value, not the on-disk placeholder). Nil if no secret field or
+    /// the value is empty.
+    func loginPassword(for element: NBElement) -> String? {
+        guard let key = activeGroup.secretFieldKeys.first,
+              let password = element.values[key], !password.isEmpty else { return nil }
+        return password
+    }
+
+    /// True when an element carries enough to be treated as an auth credential — a username
+    /// plus a secret. Drives the auth-specific buttons (deeplink + copy-and-claim).
+    func isAuthElement(_ element: NBElement) -> Bool {
+        loginUsername(for: element) != nil && loginPassword(for: element) != nil
+    }
+
     func loginOnSim(_ element: NBElement) {
         guard let username = loginUsername(for: element) else { return }
         let scheme = deeplinkScheme.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -368,10 +383,18 @@ final class NotchboardViewModel {
             toast("set your app's debug URL scheme in settings first", color: .red)
             return
         }
-        guard let encoded = username.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return }
+        guard let encodedUser = username.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return }
+
+        var query = "user=\(encodedUser)"
+        // Pass the password too when the element has one, so the target app can fill both
+        // fields. Username-only apps simply ignore the extra param.
+        if let password = loginPassword(for: element),
+           let encodedPass = password.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
+            query += "&pass=\(encodedPass)"
+        }
 
         let wasFree = element.claimedBy == nil
-        SimctlBridge.openURL("\(scheme)://debug/login?user=\(encoded)") { [weak self] failure in
+        SimctlBridge.openURL("\(scheme)://debug/login?\(query)") { [weak self] failure in
             guard let self else { return }
             if let failure {
                 // The deeplink never fired — don't leave the element falsely claimed.
@@ -384,6 +407,32 @@ final class NotchboardViewModel {
                 self.mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
             }
             self.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
+        }
+    }
+
+    /// Copies an auth element's login and password to the clipboard (concealed) and marks
+    /// the element as in use. This is the fallback for logins the deeplink can't drive —
+    /// WebView/SSO screens (Okta and the like) — where the user pastes the credentials by
+    /// hand but still wants the element claimed so teammates don't collide. Release is the
+    /// normal manual claim/release action.
+    func copyAuthAndClaim(_ element: NBElement) {
+        let login = loginUsername(for: element) ?? element.name
+        let clipboard: String
+        if let password = loginPassword(for: element) {
+            clipboard = "\(login)\n\(password)"
+            copy(clipboard, label: "login + password", concealed: true)
+        } else {
+            copy(login, label: "login")
+        }
+
+        switch selectedElement(id: element.id)?.claimedBy?.who {
+        case nil:
+            mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
+            toast("marked “\(element.name)” in use", color: .green)
+        case "you":
+            break // already yours; the copy toast is enough
+        case .some(let who):
+            toast("\(memberName(who)) has this — coordinate before using", color: .amber)
         }
     }
 

@@ -174,9 +174,26 @@ struct DetailView: View {
             if viewModel.loginUsername(for: element) != nil {
                 Text(viewModel.deeplinkScheme.isEmpty
                      ? "set a URL scheme in settings to enable deeplinks"
-                     : "fires \(viewModel.deeplinkScheme)://debug/login?user=…")
+                     : "fires \(viewModel.deeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
                     .font(NBFont.mono(8))
                     .foregroundStyle(NBColor.textMuted)
+            }
+
+            // Fallback for logins the deeplink can't drive (WebView/SSO like Okta): copy the
+            // credentials and claim in one tap; release via the claim button above.
+            if viewModel.isAuthElement(element) {
+                Button {
+                    viewModel.copyAuthAndClaim(element)
+                } label: {
+                    Text("⧉ copy login + password · mark in use")
+                        .font(NBFont.ui(11))
+                        .foregroundStyle(NBColor.amber)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
             }
 
             HStack(spacing: 10) {
