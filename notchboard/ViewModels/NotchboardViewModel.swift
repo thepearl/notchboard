@@ -9,9 +9,12 @@
 import Foundation
 import Observation
 import SwiftUI
+import os
 #if canImport(AppKit)
 import AppKit
 #endif
+
+private let deeplinkLog = Logger(subsystem: "flourix.notchboard", category: "deeplink")
 
 enum NotchboardPanelView: Equatable {
     case list
@@ -376,13 +379,29 @@ final class NotchboardViewModel {
         loginUsername(for: element) != nil && loginPassword(for: element) != nil
     }
 
+    /// The configured scheme, normalized: strips a pasted "://" and trailing ":" / "/" /
+    /// "." / whitespace, so "mythos", "mythos.", "mythos://" and "mythos:" all resolve to
+    /// "mythos". A stray trailing dot silently produced an unhandled URL scheme.
+    var resolvedDeeplinkScheme: String {
+        var scheme = deeplinkScheme.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let separator = scheme.range(of: "://") {
+            scheme = String(scheme[..<separator.lowerBound])
+        }
+        return scheme.trimmingCharacters(in: CharacterSet(charactersIn: ":/. "))
+    }
+
     func loginOnSim(_ element: NBElement) {
-        guard let username = loginUsername(for: element) else { return }
-        let scheme = deeplinkScheme.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let username = loginUsername(for: element) else {
+            deeplinkLog.error("login on sim: element “\(element.name, privacy: .public)” has no username field")
+            return
+        }
+        let scheme = resolvedDeeplinkScheme
         guard !scheme.isEmpty else {
+            deeplinkLog.error("login on sim: no debug URL scheme configured in settings")
             toast("set your app's debug URL scheme in settings first", color: .red)
             return
         }
+        deeplinkLog.log("login on sim: firing \(scheme, privacy: .public)://debug/login for “\(element.name, privacy: .public)” (password \(self.loginPassword(for: element) != nil ? "included" : "absent", privacy: .public))")
         guard let encodedUser = username.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return }
 
         var query = "user=\(encodedUser)"

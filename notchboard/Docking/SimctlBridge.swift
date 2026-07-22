@@ -9,8 +9,16 @@
 //
 
 import Foundation
+import os
 
 enum SimctlBridge {
+    private static let logger = Logger(subsystem: "flourix.notchboard", category: "simctl")
+
+    /// The URL with its query dropped — safe to log, since the query carries the password.
+    private static func redacted(_ url: String) -> String {
+        String(url.split(separator: "?").first ?? Substring(url))
+    }
+
     enum Failure {
         case noBootedSimulator
         case failed(String)
@@ -28,6 +36,10 @@ enum SimctlBridge {
     /// Runs `xcrun simctl openurl booted <url>`. The process runs asynchronously off the
     /// main thread; `completion` is delivered on the main queue with `nil` on success.
     nonisolated static func openURL(_ url: String, completion: @escaping (Failure?) -> Void) {
+        // Logged .public so it shows in the Xcode console / Console.app; the password lives
+        // in the query, which redacted() strips.
+        logger.log("running: xcrun simctl openurl booted \(redacted(url), privacy: .public)")
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl", "openurl", "booted", url]
@@ -47,11 +59,15 @@ enum SimctlBridge {
             let failure: Failure?
             if finished.terminationStatus == 0 {
                 failure = nil
+                logger.log("simctl openurl succeeded for \(redacted(url), privacy: .public)")
             } else if stderr.localizedCaseInsensitiveContains("no devices are booted")
                         || stderr.localizedCaseInsensitiveContains("current state: shutdown") {
                 failure = .noBootedSimulator
+                logger.error("simctl openurl: no booted simulator (exit \(finished.terminationStatus, privacy: .public))")
             } else {
                 failure = .failed(stderr.isEmpty ? "exit \(finished.terminationStatus)" : String(stderr.prefix(120)))
+                // Full, untruncated stderr goes to the log even though the toast truncates.
+                logger.error("simctl openurl failed (exit \(finished.terminationStatus, privacy: .public)): \(stderr.isEmpty ? "<no stderr>" : stderr, privacy: .public)")
             }
             DispatchQueue.main.async { completion(failure) }
         }
@@ -59,6 +75,7 @@ enum SimctlBridge {
         do {
             try process.run()
         } catch {
+            logger.error("could not launch xcrun: \(error.localizedDescription, privacy: .public)")
             DispatchQueue.main.async { completion(.failed(error.localizedDescription)) }
         }
     }

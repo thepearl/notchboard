@@ -72,7 +72,7 @@ struct DetailView: View {
     }
 
     private var fieldsSection: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(group.fields) { field in
                 FieldRow(
                     label: field.label,
@@ -172,9 +172,9 @@ struct DetailView: View {
             }
 
             if viewModel.loginUsername(for: element) != nil {
-                Text(viewModel.deeplinkScheme.isEmpty
+                Text(viewModel.resolvedDeeplinkScheme.isEmpty
                      ? "set a URL scheme in settings to enable deeplinks"
-                     : "fires \(viewModel.deeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
+                     : "fires \(viewModel.resolvedDeeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
                     .font(NBFont.mono(8))
                     .foregroundStyle(NBColor.textMuted)
             }
@@ -264,6 +264,7 @@ private struct FieldRow: View {
         .background(NBColor.field)
         .overlay(RoundedRectangle(cornerRadius: 3).stroke(hovering ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 3))
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture(perform: onCopy)
         .onHover { hovering = $0 }
