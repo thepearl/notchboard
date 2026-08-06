@@ -490,3 +490,30 @@ registration failure does **not** mean another app holds the chord. With `inOpti
 `CarbonEvents.h` documents that several applications may register the same hot key and all be
 notified. Failure means a duplicate registration inside this process, or a clash with a
 `kEventHotKeyExclusive` holder.
+
+### 13.6 The deeplink bridge, proven end to end (2026-08-06)
+
+Until now the "⚡ login on sim" path had only ever been tested up to the `simctl` boundary: the
+command ran and reported success, but no iOS app had ever received the URL and actually logged
+anyone in. The product's headline feature was unverified.
+
+`SampleApp/NotchDemo` closes that. It is a small SwiftUI app that registers `notchdemo://` and
+handles `debug/login`, and it now serves two purposes: the standing target for dogfooding, and
+the reference integration a real team would copy (see `SampleApp/README.md` — the whole
+contract is an Info.plist entry and about ten lines in `onOpenURL`).
+
+Verified on an iPhone 17 Pro simulator running iOS 26.4: the deeplink fills the login form and
+signs in, and a second deeplink while already signed in swaps accounts cleanly.
+
+Two things this surfaced that no amount of local reasoning would have:
+
+- **iOS confirms the first deeplink.** Opening a custom scheme from outside the app raises an
+  "Open in NotchDemo?" alert. It appears on the *first* deeplink only; afterwards the system
+  remembers the choice and every subsequent login is instant. So the friction is one tap per
+  simulator install, not per login — but a user who fires the feature once and sees a dialog
+  could reasonably conclude the bridge is broken, which is worth saying in the UI eventually.
+- **The bridge's own code is now covered against a real simulator**, not just stubbed.
+  `SimctlBridgeIntegrationTests` fires `SimctlBridge.openURL` for real and asserts both the
+  success path and that an unregistered scheme reports failure rather than silent success. It
+  skips itself when no simulator is booted, and it has a timeout that fails loudly if the
+  completion never arrives — which is exactly the hang the stderr-drain fix in §13.1 removed.
