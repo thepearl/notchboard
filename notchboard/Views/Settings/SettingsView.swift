@@ -15,6 +15,7 @@ struct SettingsView: View {
     let onReplayOnboarding: () -> Void
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var launchAtLoginNeedsApproval = LaunchAtLogin.status == .requiresApproval
 
     var body: some View {
         Form {
@@ -27,18 +28,42 @@ struct SettingsView: View {
                     }
                 }
 
-                Stepper(value: $viewModel.autoReleaseMinutes, in: 5...240, step: 5) {
+                Stepper(value: $viewModel.autoReleaseMinutes, in: NotchboardViewModel.autoReleaseRange, step: 5) {
                     Text("Auto-release claims after \(viewModel.autoReleaseMinutes) min idle")
                 }
 
-                Toggle("Live sync (simulated presence)", isOn: $viewModel.liveSyncEnabled)
+                Picker("Global shortcut", selection: $viewModel.hotKeyModifier) {
+                    ForEach(NBHotKeyModifier.allCases) { modifier in
+                        Text(modifier.label).tag(modifier)
+                    }
+                }
+                Text(viewModel.hotKeyModifier.costNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
+                        // Ignore our own write-backs, or reverting the toggle would fire a
+                        // redundant unregister.
+                        guard newValue != LaunchAtLogin.isEnabled else { return }
                         // Reflect what the system actually did — registration can fail
-                        // (e.g. an unsigned build), and the toggle shouldn't lie.
-                        launchAtLogin = LaunchAtLogin.setEnabled(newValue)
+                        // (e.g. an unsigned build) or land in requires-approval, and the
+                        // toggle shouldn't lie.
+                        let status = LaunchAtLogin.setEnabled(newValue)
+                        launchAtLoginNeedsApproval = status == .requiresApproval
+                        launchAtLogin = status == .enabled
                     }
+
+                if launchAtLoginNeedsApproval {
+                    HStack {
+                        Text("Pending your approval in Login Items")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Open Login Items…") {
+                            LaunchAtLogin.openSystemSettings()
+                        }
+                    }
+                }
             }
 
             Section {

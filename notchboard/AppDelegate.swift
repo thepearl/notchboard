@@ -17,6 +17,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import os
 
 /// Which "shape" the floating panel is currently showing. Only *transitions* between these
 /// (not every position update while following Simulator) get an animated resize — continuous
@@ -41,7 +42,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var repositionTimer: Timer?
     private var lastContentMode: PanelContentMode?
-    private var globalKeyMonitor: Any?
+    /// The frame most recently handed to `apply` — compared instead of `panel.frame`, which
+    /// reports intermediate values while a resize animation is in flight. Comparing the live
+    /// frame made the next 0.15s tick "correct" every mode-transition animation with an
+    /// instant snap ~150ms in, so the animation never completed.
+    private var lastTargetFrame: NSRect?
+    /// Bumped whenever visibility intent changes; an in-flight hide whose generation is
+    /// stale was superseded by a show and must not order the panel out.
+    private var visibilityGeneration = 0
+    /// Consuming global shortcuts (Carbon). Registered only while the panel can respond, so
+    /// the chord goes back to the rest of the system the moment it can't.
+    private let hotKeys = GlobalHotKeys()
+    private var hotKeysRegistered = false
+    private var hotKeyModifier: NBHotKeyModifier?
     private var localKeyMonitor: Any?
 
     /// Menu-bar fallback (vision.md §9): when true and no Simulator window is available to
@@ -50,11 +63,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fallbackPanelVisible = false
     private var fallbackMenuItem: NSMenuItem?
 
+    private static let shortcutLog = Logger(subsystem: "flourix.notchboard", category: "shortcuts")
+
     private static let onboardingSize = CGSize(width: 468, height: 470)
     private static let coachMarkExtraWidth: CGFloat = 16 + NBMetrics.coachMarkWidth + 20
     private static let resizeAnimationDuration: TimeInterval = 0.22
 
+    /// True when the process is hosting a unit-test run (TEST_HOST injection). The tests
+    /// construct their own view models, so the app skips all runtime setup — panel, timers,
+    /// monitors — and, critically, never loads or saves the user's real state.json.
+    private static var isRunningTests: Bool {
+        NSClassFromString("XCTestCase") != nil
+            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !Self.isRunningTests else { return }
+
         // Agent-style app: no Dock icon, no default app menu. The status item below is the
         // fallback entry point instead (see vision.md §9).
         NSApp.setActivationPolicy(.accessory)
@@ -62,6 +88,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let (viewModel, onboarding) = Self.makeViewModels()
         self.viewModel = viewModel
         self.onboarding = onboarding
+
+        // Sweep Keychain entries no element references any more — deleting state.json (the
+        // documented reset path) used to orphan every secret of the old workspace forever.
+        // Skipped while a corrupt-state backup exists: the user may restore it, and its
+        // elements' secrets must survive until then.
+        if !AppStateStore.corruptBackupExists {
+            SecretsStore.pruneOrphans(keeping: Set(viewModel.workspace.allSecretKeychainKeys))
+        }
 
         setUpPanel()
         setUpStatusItem()
@@ -76,10 +110,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         repositionTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             self?.updatePanelFrame()
         }
+
+        // Place and show the panel now rather than waiting ~0.15s for the first tick —
+        // the delay showed the panel at its placeholder frame in the screen corner on
+        // every launch. makeKey afterwards so onboarding's name field can take focus.
+        updatePanelFrame()
+        panel.makeKey()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        guard !Self.isRunningTests else { return }
+        // Hand the chords back explicitly rather than relying on process teardown.
+        hotKeys.setEnabled(false)
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         repositionTimer?.invalidate()
         tracker.stop()
@@ -126,8 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isReleasedWhenClosed = false
         panel.contentViewController = hosting
         self.panel = panel
-        panel.orderFrontRegardless()
-        panel.makeKey()
+        // Not ordered front here: the panel would flash at its placeholder (0,0) frame for
+        // one timer tick. applicationDidFinishLaunching positions it first via
+        // updatePanelFrame(), whose show() path orders it front at the right place.
     }
 
     private func setUpStatusItem() {
@@ -174,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func replayOnboardingFromMenu() {
         onboarding.reset()
+        viewModel.replayOnboarding()
     }
 
     @objc private func toggleFallbackFromMenu() {
@@ -241,7 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let view = SettingsView(viewModel: viewModel, onReplayOnboarding: { [weak self] in self?.onboarding.reset() })
+        let view = SettingsView(viewModel: viewModel, onReplayOnboarding: { [weak self] in
+            self?.onboarding.reset()
+            self?.viewModel.replayOnboarding()
+        })
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = "Notchboard Settings"
@@ -254,37 +301,142 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
-    // MARK: - Global keyboard shortcuts
+    // MARK: - Keyboard shortcuts
+
+    /// Where a shortcut event came from. Local events are delivered to Notchboard's own
+    /// windows (and can be swallowed); global events are observe-only — macOS never lets a
+    /// global monitor consume the keystroke, so the frontmost app acts on it too.
+    private enum ShortcutScope {
+        case local, global
+    }
 
     private func installGlobalShortcuts() {
+        // Local monitor: events already being delivered to Notchboard's own windows. This one
+        // *can* swallow, and it always accepts the plain ⌘ chords so the panel behaves like a
+        // normal app window regardless of which global modifier is configured.
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            (self?.handleGlobalShortcut(event) ?? false) ? nil : event
+            (self?.handleShortcut(event, scope: .local) ?? false) ? nil : event
         }
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            _ = self?.handleGlobalShortcut(event)
+        syncHotKeyCombos()
+    }
+
+    /// Points the Carbon registration at the currently configured modifier. Called at launch
+    /// and whenever the Settings picker changes it.
+    private func syncHotKeyCombos() {
+        let modifier = viewModel.hotKeyModifier
+        hotKeyModifier = modifier
+        hotKeys.setCombos([
+            (combo: .search(modifier: modifier), handler: { [weak self] in self?.performSearchShortcut() }),
+            (combo: .newElement(modifier: modifier), handler: { [weak self] in self?.performNewElementShortcut() }),
+        ])
+    }
+
+    /// Apps in whose company Notchboard is allowed to claim its chords: the iOS development
+    /// context the tool exists to sit alongside, plus itself.
+    ///
+    /// This is the mechanism that makes a plain single-modifier chord defensible. A Carbon
+    /// registration is consumed system-wide, and ⌃K/⌃N in particular are real bindings
+    /// elsewhere (Cocoa's delete-to-end-of-paragraph and move-down, zsh's kill-line and
+    /// down-line-or-history). Rather than take them from the whole machine, Notchboard holds
+    /// them only while the user is in Xcode or Simulator, which is exactly where they would
+    /// reach for the catalogue. Switch to Terminal and ⌃K is kill-line again on the next tick.
+    /// Rectangle uses the same idea in reverse, unregistering its hotkeys while a chosen app
+    /// is frontmost.
+    private static let hotKeyHostBundleIDs: Set<String> = [
+        SimulatorWindowTracker.simulatorBundleID,
+        "com.apple.dt.Xcode",
+        Bundle.main.bundleIdentifier ?? "flourix.notchboard",
+    ]
+
+    /// True while the frontmost app is one Notchboard may claim chords around.
+    private var hotKeyHostIsFrontmost: Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
         }
+        return Self.hotKeyHostBundleIDs.contains(bundleID)
+    }
+
+    /// Claims the global chords only while they can be acted on *and* the user is in the
+    /// iOS-development context, and hands them straight back otherwise.
+    private func syncHotKeyRegistration() {
+        if viewModel.hotKeyModifier != hotKeyModifier {
+            syncHotKeyCombos()
+            // Force a re-register so the new chord takes effect immediately.
+            hotKeys.setEnabled(false)
+            hotKeysRegistered = false
+        }
+        let shouldRegister = !onboarding.isPresented && panelIsInteractable && hotKeyHostIsFrontmost
+        guard shouldRegister != hotKeysRegistered else { return }
+        hotKeysRegistered = shouldRegister
+        hotKeys.setEnabled(shouldRegister)
+    }
+
+    /// True when the panel is actually on screen for the user to see the shortcut's effect.
+    /// Shortcuts must never mutate an invisible panel — a Simulator that is running but
+    /// hidden/minimized keeps `isSimulatorRunning` true while the panel is ordered out, and
+    /// stale state would surface later as a panel reopening in a view the user never chose.
+    private var panelIsInteractable: Bool {
+        if fallbackPanelVisible { return true }
+        return tracker.isSimulatorRunning && tracker.simulatorWindowFrame != nil && panel.isVisible
     }
 
     /// Returns `true` if the event was one of our shortcuts and was handled (so the local
     /// monitor can swallow it instead of also delivering it to whatever's focused).
-    @discardableResult
-    private func handleGlobalShortcut(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return false }
-        guard tracker.isSimulatorRunning || fallbackPanelVisible, !onboarding.isPresented else { return false }
+    ///
+    /// Only handles events already destined for Notchboard's own panel. Reaching the
+    /// catalogue from *another* app is the Carbon registration's job (see GlobalHotKeys) —
+    /// an `NSEvent` global monitor cannot consume a keystroke, which is why the previous
+    /// version double-triggered Xcode's New File on every ⌘N.
+    private func handleShortcut(_ event: NSEvent, scope: ShortcutScope) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Inside the panel, accept the plain ⌘ chords as well as whatever global modifier is
+        // configured: within our own window there is nothing to collide with, and ⌘K/⌘N is
+        // what the panel's own copy advertises.
+        let accepted: [NSEvent.ModifierFlags] = [.command, viewModel.hotKeyModifier.appKitFlags]
+        guard accepted.contains(modifiers) else { return false }
+        // Only when the panel itself is focused — a ⌘N typed into the Settings window (or any
+        // future window) must reach that window, not be swallowed here.
+        guard event.window === panel else { return false }
+        guard !onboarding.isPresented, panelIsInteractable else { return false }
 
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "k":
-            viewModel.isExpanded = true
-            viewModel.currentView = .list
-            viewModel.searchFocusToken += 1
+            performSearchShortcut()
             return true
         case "n":
-            viewModel.isExpanded = true
-            viewModel.openAdd()
+            performNewElementShortcut()
             return true
         default:
             return false
         }
+    }
+
+    /// Open the catalogue and focus search. Shared by the in-panel ⌘K and the global chord.
+    private func performSearchShortcut() {
+        guard !onboarding.isPresented, panelIsInteractable else { return }
+        Self.shortcutLog.log("search shortcut fired")
+        viewModel.isExpanded = true
+        viewModel.currentView = .list
+        viewModel.searchFocusToken += 1
+        bringPanelForward()
+    }
+
+    /// Open the add-element form. Shared by the in-panel ⌘N and the global chord.
+    private func performNewElementShortcut() {
+        guard !onboarding.isPresented, panelIsInteractable else { return }
+        Self.shortcutLog.log("new-element shortcut fired")
+        viewModel.isExpanded = true
+        viewModel.openAdd()
+        bringPanelForward()
+    }
+
+    /// A global chord can fire while another app is frontmost, so the panel has to come
+    /// forward and take key focus for typing to land in it. The panel is a non-activating
+    /// panel, so this doesn't steal activation from Xcode or Simulator — the app itself never
+    /// becomes frontmost (see FloatingPanel and CLAUDE.md).
+    private func bringPanelForward() {
+        panel.orderFrontRegardless()
+        panel.makeKey()
     }
 
     // MARK: - Panel positioning
@@ -292,10 +444,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updatePanelFrame() {
         guard let panel else { return }
 
+        // Claim or release the global chords as availability changes. Cheap: this only calls
+        // into Carbon on an actual transition.
+        syncHotKeyRegistration()
+
+        // Onboarding may have finished before Simulator ever ran — deliver the deferred
+        // coach mark the first time it appears instead of silently skipping it. Lives on
+        // this AppKit-side tick (not a SwiftUI onChange) so no view has to observe the
+        // tracker, whose per-poll property writes would re-render the whole panel tree.
+        if tracker.isSimulatorRunning, viewModel.pendingCoachMark, !onboarding.isPresented {
+            viewModel.pendingCoachMark = false
+            viewModel.showCoachMark = true
+            viewModel.isExpanded = false
+        }
+
         // Onboarding always shows regardless of whether Simulator happens to be running yet —
-        // setup shouldn't require Simulator to already be open.
+        // setup shouldn't require Simulator to already be open. Positioned once on entry
+        // (centred on the screen with the mouse) and then left alone, draggable — a per-tick
+        // recentre made the dialog teleport between displays whenever the cursor crossed
+        // screens, mid-typing included.
         if onboarding.isPresented {
             show(panel)
+            panel.isMovableByWindowBackground = true
+            guard lastContentMode != .onboarding else { return }
             let size = Self.onboardingSize
             guard let screen = screenNearMouse() else { return }
             let origin = CGPoint(x: screen.frame.midX - size.width / 2, y: screen.frame.midY - size.height / 2)
@@ -332,10 +503,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             size = CGSize(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight)
         }
 
-        // Dock flush against the chosen Simulator window edge, vertically centered on it.
-        let x = viewModel.dockEdge == .right ? simFrame.maxX : simFrame.minX - size.width
+        let frame = Self.dockedFrame(
+            simFrame: simFrame,
+            size: size,
+            edge: viewModel.dockEdge,
+            clampedTo: screenContaining(simFrame)?.visibleFrame
+        )
+        apply(frame, to: panel, mode: mode)
+    }
+
+    /// The docked panel frame: flush against the chosen Simulator window edge, vertically
+    /// centred on it, then clamped to the screen's visible frame. Without the clamp, a
+    /// Simulator window flush against the screen edge (zoomed, fullscreen) put the whole
+    /// panel offscreen — still "visible" as far as AppKit was concerned, but unreachable.
+    /// Borderless panels get none of AppKit's usual titled-window frame constraining.
+    static func dockedFrame(simFrame: NSRect, size: CGSize, edge: NBDockEdge, clampedTo visible: NSRect?) -> NSRect {
+        let x = edge == .right ? simFrame.maxX : simFrame.minX - size.width
         let y = simFrame.midY - size.height / 2
-        apply(NSRect(x: x, y: y, width: size.width, height: size.height), to: panel, mode: mode)
+        var frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+        if let visible {
+            frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
+            frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
+        }
+        return frame
+    }
+
+    /// The screen the Simulator window is (mostly) on — used to clamp the docked panel so
+    /// it can't land offscreen.
+    private func screenContaining(_ rect: NSRect) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.screens.first
     }
 
     /// Lays out the undocked fallback panel. Positioned once on entry (centred on the
@@ -367,7 +563,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func show(_ panel: NSPanel) {
-        guard !panel.isVisible else { return }
+        // Supersede any in-flight hide: its completion must not order the panel out from
+        // under a state that wants it visible (a brief Cmd-H + unhide flickered the panel).
+        visibilityGeneration += 1
+        guard !panel.isVisible else {
+            // Restore alpha only if a superseded hide left it mid-fade — an unconditional
+            // write would invalidate the window on every 0.15s tick.
+            if panel.alphaValue != 1 { panel.alphaValue = 1 }
+            return
+        }
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
@@ -378,11 +582,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hide(_ panel: NSPanel) {
         guard panel.isVisible else { return }
+        visibilityGeneration += 1
+        let generation = visibilityGeneration
         lastContentMode = nil // force a fresh (non-animated) frame snap next time it reappears
+        lastTargetFrame = nil
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
             panel.animator().alphaValue = 0
-        }, completionHandler: {
+        }, completionHandler: { [weak self] in
+            guard let self, generation == self.visibilityGeneration else {
+                // A show superseded this hide mid-fade — leave the panel up.
+                panel.alphaValue = 1
+                return
+            }
             panel.orderOut(nil)
             panel.alphaValue = 1
         })
@@ -390,12 +602,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Applies a new frame to the panel. Position-only updates while following Simulator
     /// (e.g. the user dragging its window) snap instantly for 1:1 tracking; genuine content
-    /// mode changes (collapse ↔ expand, coach mark appearing, etc.) animate smoothly.
+    /// mode changes (collapse ↔ expand, coach mark appearing, etc.) animate smoothly. The
+    /// very first placement after launch or a hide snaps without animating — there is no
+    /// previous frame worth animating from.
     private func apply(_ frame: NSRect, to panel: NSPanel, mode: PanelContentMode) {
-        guard panel.frame != frame else { return }
-
-        let isModeTransition = lastContentMode != mode
+        let isModeTransition = lastContentMode != nil && lastContentMode != mode
+        // Compare against the last *target*, never the live frame: mid-animation the live
+        // frame is intermediate, and treating it as drift snapped every transition
+        // animation dead ~150ms in.
+        guard isModeTransition || frame != lastTargetFrame else { return }
         lastContentMode = mode
+        lastTargetFrame = frame
 
         if isModeTransition {
             NSAnimationContext.runAnimationGroup { context in

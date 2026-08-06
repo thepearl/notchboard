@@ -4,11 +4,14 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct NewGroupView: View {
     @Bindable var viewModel: NotchboardViewModel
 
     @State private var confirmingDelete = false
+    /// The field currently being dragged by its ⋮⋮ handle (vision §5.5 reorderable list).
+    @State private var draggedFieldID: UUID?
 
     private var isEditing: Bool { viewModel.editingGroupID != nil }
 
@@ -30,13 +33,7 @@ struct NewGroupView: View {
 
     private var header: some View {
         HStack(spacing: 9) {
-            Button(action: viewModel.backToList) {
-                Text("←")
-                    .font(NBFont.ui(13))
-                    .foregroundStyle(NBColor.textSecondary)
-                    .padding(4)
-            }
-            .buttonStyle(.plain)
+            NBBackButton(action: viewModel.backToList)
             Text(isEditing ? "edit group" : "new group")
                 .font(NBFont.ui(13, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
@@ -52,8 +49,8 @@ struct NewGroupView: View {
                 .padding(.horizontal, 10)
                 .frame(height: 34)
                 .background(NBColor.field)
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
         }
         .padding(.top, 13)
     }
@@ -69,6 +66,16 @@ struct NewGroupView: View {
                     FieldEditorRow(field: $field) {
                         viewModel.removeNewGroupField(field.id)
                     }
+                    .opacity(draggedFieldID == field.id ? 0.4 : 1)
+                    .onDrag {
+                        draggedFieldID = field.id
+                        return NSItemProvider(object: field.id.uuidString as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: FieldReorderDropDelegate(
+                        targetID: field.id,
+                        draggedID: $draggedFieldID,
+                        fields: $viewModel.newGroupFields
+                    ))
                 }
             }
 
@@ -77,7 +84,7 @@ struct NewGroupView: View {
                     .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.amber)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
             .padding(.top, 2)
         }
     }
@@ -100,9 +107,9 @@ struct NewGroupView: View {
                     .foregroundStyle(NBColor.red)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.red.opacity(confirmingDelete ? 0.8 : 0.35), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.red.opacity(confirmingDelete ? 0.8 : 0.35), lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
         }
         .padding(.top, 14)
     }
@@ -116,19 +123,46 @@ struct NewGroupView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
                     .background(NBColor.amber)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
 
             Button(action: viewModel.backToList) {
                 Text("cancel")
                     .font(NBFont.ui(11))
                     .foregroundStyle(NBColor.textSecondaryAlt)
                     .frame(width: 80, height: 36)
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.border, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.border, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
         }
+    }
+}
+
+/// Reorders the fields list live while a row is dragged over its siblings — the standard
+/// onDrag/DropDelegate pattern for reordering inside a plain VStack (List's onMove would
+/// bring List chrome the carbon design doesn't want).
+private struct FieldReorderDropDelegate: DropDelegate {
+    let targetID: UUID
+    @Binding var draggedID: UUID?
+    @Binding var fields: [NBField]
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedID, draggedID != targetID,
+              let from = fields.firstIndex(where: { $0.id == draggedID }),
+              let to = fields.firstIndex(where: { $0.id == targetID }) else { return }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            fields.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedID = nil
+        return true
     }
 }
 
@@ -163,12 +197,12 @@ private struct FieldEditorRow: View {
                     .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.textMuted)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(NBColor.field)
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
     }
 }

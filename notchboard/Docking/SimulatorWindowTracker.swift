@@ -45,29 +45,43 @@ final class SimulatorWindowTracker {
         timer = nil
     }
 
-    deinit { stop() }
+    // No `deinit { stop() }`: deinit is nonisolated, and calling the main-actor-isolated
+    // stop() from it is an unchecked cross-isolation call that Swift 6 rejects — and
+    // Timer.invalidate must run on the scheduling thread anyway. The tracker is owned by
+    // AppDelegate for the app's lifetime; the owner calls stop() in applicationWillTerminate.
+
+    /// Observation notifies on every property *write*, not every value change — a poller
+    /// that reassigns identical values a few times per second would re-render any observing
+    /// SwiftUI view at that rate. All poll-driven writes go through these equality guards.
+    private func setRunning(_ running: Bool) {
+        if isSimulatorRunning != running { isSimulatorRunning = running }
+    }
+
+    private func setFrame(_ frame: CGRect?) {
+        if simulatorWindowFrame != frame { simulatorWindowFrame = frame }
+    }
 
     private func poll() {
         guard AccessibilityPermission.isTrusted else {
-            isSimulatorRunning = false
-            simulatorWindowFrame = nil
+            setRunning(false)
+            setFrame(nil)
             return
         }
 
         guard let simulatorApp = NSWorkspace.shared.runningApplications.first(where: {
             $0.bundleIdentifier == Self.simulatorBundleID
         }) else {
-            isSimulatorRunning = false
-            simulatorWindowFrame = nil
+            setRunning(false)
+            setFrame(nil)
             return
         }
 
-        isSimulatorRunning = true
+        setRunning(true)
 
         // Hidden (⌘H) or minimized — both are "put the Simulator down for later", and both
         // mean there's no visible window to dock against.
         if simulatorApp.isHidden {
-            simulatorWindowFrame = nil
+            setFrame(nil)
             return
         }
 
@@ -83,20 +97,24 @@ final class SimulatorWindowTracker {
         let pid = simulatorApp.processIdentifier
         Task.detached(priority: .userInitiated) { [weak self] in
             let frame = Self.frontmostWindowFrame(forProcess: pid, primaryScreenHeight: screenHeight)
-            await MainActor.run {
-                guard let self else { return }
-                self.isReadingFrame = false
-                // A read that raced Simulator quitting, being hidden/minimized, or having
-                // permission revoked must not resurrect a stale frame. Re-check the same
-                // conditions poll() gates on, against current state.
-                guard self.isSimulatorRunning,
-                      let app = NSWorkspace.shared.runningApplications.first(where: {
-                          $0.processIdentifier == pid
-                      }),
-                      !app.isHidden else { return }
-                self.simulatorWindowFrame = frame
-            }
+            // `weak self` is unwrapped here rather than inside the MainActor closure: the
+            // closure would otherwise capture the mutable optional binding itself, which
+            // Swift 6 rejects.
+            await self?.applyPolledFrame(frame, pid: pid)
         }
+    }
+
+    /// Adopts the result of a background AX read. A read that raced Simulator quitting,
+    /// being hidden/minimized, or having permission revoked must not resurrect a stale
+    /// frame, so this re-checks the same conditions `poll()` gates on against current state.
+    private func applyPolledFrame(_ frame: CGRect?, pid: pid_t) {
+        isReadingFrame = false
+        guard isSimulatorRunning,
+              let app = NSWorkspace.shared.runningApplications.first(where: {
+                  $0.processIdentifier == pid
+              }),
+              !app.isHidden else { return }
+        setFrame(frame)
     }
 
     /// AX global coordinates are relative to the *primary* screen's top-left corner — the

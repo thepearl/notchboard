@@ -32,8 +32,9 @@ struct GroupTabsView: View {
                     Text("✎")
                         .font(NBFont.ui(11))
                         .foregroundStyle(NBColor.textSecondary)
+                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
                 .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)
                 .help("edit “\(viewModel.activeGroup.label)” (rename, fields, delete)")
             }
@@ -43,7 +44,7 @@ struct GroupTabsView: View {
                     .font(NBFont.ui(11))
                     .foregroundStyle(NBColor.textSecondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
             .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)
         }
         .padding(.horizontal, 16)
@@ -70,6 +71,32 @@ private struct GroupTab: View {
             .onTapGesture(perform: onTap)
             .onHover { hovering = $0 }
             .fixedSize()
+            .focusEffectDisabled()
+    }
+}
+
+/// The back affordance shared by the detail, add, and new-group screens.
+///
+/// The hit area is the whole 26pt square, not the glyph's own bounds. A bare
+/// `Text("←")` in a plain-styled Button is only clickable on the arrow's drawn pixels, which
+/// made this feel broken — you had to hit the stroke itself.
+struct NBBackButton: View {
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("←")
+                .font(NBFont.ui(13))
+                .foregroundStyle(hovering ? NBColor.textPrimaryAlt : NBColor.textSecondary)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.nbPlain)
+        .focusEffectDisabled()
+        .onHover { hovering = $0 }
+        .help("back to the list (Esc)")
     }
 }
 

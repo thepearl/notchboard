@@ -1,0 +1,93 @@
+included:
+  - notchboard
+  - notchboardTests
+
+excluded:
+  - notchboard.xcodeproj
+
+disabled_rules:
+  # The design system deliberately uses numeric literals for layout (padding, sizes) that
+  # are one-off to a single view; the shared ones already live in NBMetrics.
+  - todo
+
+opt_in_rules:
+  - empty_count
+  - first_where
+  - contains_over_first_not_nil
+  - last_where
+  - sorted_first_last
+  - unneeded_parentheses_in_closure_argument
+  - redundant_nil_coalescing
+  - closure_spacing
+  - literal_expression_end_indentation
+  - operator_usage_whitespace
+  - overridden_super_call
+  - prohibited_super_call
+  - fatal_error_message
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+
+line_length:
+  warning: 110
+  error: 140
+  ignores_comments: false
+  ignores_urls: true
+
+# CLAUDE.md's file-size guidance: many small files, organised by feature.
+file_length:
+  warning: 500
+  error: 900
+
+type_body_length:
+  warning: 350
+  error: 600
+
+function_body_length:
+  warning: 60
+  error: 120
+
+cyclomatic_complexity:
+  warning: 12
+  error: 20
+
+identifier_name:
+  min_length:
+    warning: 2
+  excluded:
+    - id
+    - x
+    - y
+    - r
+    - g
+    - b
+    - to
+    - up
+
+nesting:
+  type_level:
+    warning: 2
+
+force_unwrapping:
+  severity: warning
+
+force_cast:
+  severity: warning
+
+# AX APIs return CFTypeRef that genuinely needs the checked-then-forced bridge cast; those
+# sites verify CFGetTypeID first, which is the safe idiom for that C API.
+custom_rules:
+  no_raw_hex_color:
+    name: "Raw hex colour outside the design system"
+    regex: 'Color\(hex: 0x'
+    match_kinds:
+      - identifier
+    excluded: "notchboard/DesignSystem/NBColor.swift"
+    message: "Add the colour to NBColor instead of using a raw hex literal in a view."
+    severity: warning
+  no_ungated_repeat_forever:
+    name: "Continuous animation in the transparent panel"
+    regex: 'repeatForever'
+    message: "The panel is a transparent window: continuous animation costs ~20% CPU while it is open. Gate it behind hover/interaction state (see IdleAnimationGuardTests)."
+    severity: warning
+
+reporter: "xcode"

@@ -75,4 +75,25 @@ final class OnboardingViewModel {
     func back() {
         step = max(1, step - 1)
     }
+
+    /// Polls a trust probe until it reports granted or the surrounding task is cancelled.
+    /// The permission step's `.task` runs this while the step is visible; the user grants
+    /// access in System Settings, outside our window, so there's no callback to observe.
+    ///
+    /// Cancellation must exit the loop: `Task.sleep` throws `CancellationError` once the
+    /// task is cancelled, and swallowing that (`try?`) turns the poll into a zero-delay
+    /// main-actor spin for the rest of the session — a real bug this replaced.
+    func pollAccessibility(
+        probe: () -> Bool = { AccessibilityPermission.isTrusted },
+        interval: Duration = .milliseconds(500)
+    ) async {
+        while !accessibilityGranted && !Task.isCancelled {
+            accessibilityGranted = probe()
+            do {
+                try await Task.sleep(for: interval)
+            } catch {
+                return
+            }
+        }
+    }
 }

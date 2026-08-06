@@ -32,18 +32,7 @@ enum WorkspaceTransfer {
     /// recipient imports the catalogue's shape and non-secret data, then re-enters secrets
     /// locally (they go to their own Keychain).
     static func exportData(_ workspace: NBWorkspace) throws -> Data {
-        var stripped = workspace
-        for (groupID, group) in workspace.groups {
-            let secretKeys = group.secretFieldKeys
-            guard !secretKeys.isEmpty else { continue }
-            var group = group
-            for index in group.elements.indices {
-                for key in secretKeys where group.elements[index].values[key] != nil {
-                    group.elements[index].values[key] = ""
-                }
-            }
-            stripped.groups[groupID] = group
-        }
+        let stripped = workspace.mappingSecretValues { _, _, _ in "" }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(WorkspaceTransferFile(workspace: stripped))

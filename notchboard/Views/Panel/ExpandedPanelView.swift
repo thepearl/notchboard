@@ -13,7 +13,7 @@ struct ExpandedPanelView: View {
         VStack(spacing: 0) {
             PanelHeaderView(
                 workspaceName: viewModel.workspace.name,
-                onlineCount: viewModel.workspace.onlineCount,
+                memberCount: viewModel.workspace.memberCount,
                 onCollapse: viewModel.toggleExpanded
             )
 

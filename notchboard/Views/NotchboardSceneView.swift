@@ -36,6 +36,11 @@ struct NotchboardSceneView: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: contentModeKey)
+        // No system focus rings anywhere in the panel. Every control here draws its own
+        // active/hover state, and AppKit's blue ring around a borderless transparent panel
+        // read as a stray rectangle rather than an affordance. The Settings window is a
+        // separate, ordinary window and keeps its native rings.
+        .focusEffectDisabled()
         .overlay(alignment: .bottomTrailing) {
             ToastStackView(toasts: viewModel.toasts)
                 .padding(14)
@@ -51,11 +56,16 @@ struct NotchboardSceneView: View {
         .onChange(of: viewModel.workspace) { persist() }
         .onChange(of: viewModel.autoReleaseMinutes) { persist() }
         .onChange(of: viewModel.startExpanded) { persist() }
-        .onChange(of: viewModel.liveSyncEnabled) { persist() }
         .onChange(of: viewModel.deeplinkScheme) { persist() }
         .onChange(of: viewModel.dockEdge) { persist() }
+        .onChange(of: viewModel.hotKeyModifier) { persist() }
+        .onChange(of: viewModel.pendingCoachMark) { persist() }
         .onChange(of: onboarding.isPresented) { persist() }
         .onChange(of: onboarding.name) { persist() }
+        // Deliberately NOT observing the tracker here: its properties are rewritten by a
+        // sub-second poll, and a SwiftUI dependency on it re-rendered the whole panel tree
+        // several times per second (~25% CPU, caught by profiling). The deferred coach
+        // mark is promoted by AppDelegate's reposition tick instead.
     }
 
     private func persist() {
@@ -90,28 +100,50 @@ struct NotchboardSceneView: View {
         )
     }
 
+    /// Collapsed layout mirrors the dock edge: the notch sits on the side flush against
+    /// the Simulator window (leading when docked right of it, trailing when docked left),
+    /// with the coach mark on the outward side. Ignoring the edge left the notch floating
+    /// the full coach-mark width away from Simulator whenever "Dock to: left" was set.
     private var collapsedContent: some View {
         HStack(alignment: .top, spacing: 16) {
-            CollapsedNotchView(claimedCount: viewModel.claimedCount) {
-                viewModel.toggleExpanded()
+            if viewModel.dockEdge == .right {
+                notch
+                coachMarkIfShown
+                Spacer(minLength: 0)
+            } else {
+                Spacer(minLength: 0)
+                coachMarkIfShown
+                notch
             }
-            .frame(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight, alignment: .top)
-
-            if viewModel.showCoachMark {
-                CoachMarkView(onDone: { viewModel.showCoachMark = false })
-                    .padding(.top, 24)
-            }
-
-            Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
+    private var notch: some View {
+        CollapsedNotchView(claimedCount: viewModel.claimedCount, edge: viewModel.dockEdge) {
+            viewModel.toggleExpanded()
+        }
+        .frame(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var coachMarkIfShown: some View {
+        if viewModel.showCoachMark {
+            CoachMarkView(onDone: { viewModel.showCoachMark = false })
+                .padding(.top, 24)
+        }
+    }
+
     private func finishOnboarding() {
         onboarding.isPresented = false
+        // Coach mark now if Simulator is visible, deferred to its first appearance if not —
+        // never silently dropped.
         viewModel.showCoachMark = tracker.isSimulatorRunning
+        viewModel.pendingCoachMark = !tracker.isSimulatorRunning
         viewModel.isExpanded = false
-        viewModel.toast("joined acme-mobile · 21 elements synced", color: .green)
+        // Real numbers from the workspace actually loaded, and no "synced" claim — there
+        // is no backend behind this join yet.
+        viewModel.toast("joined \(viewModel.workspace.name) · \(viewModel.workspace.elementCount) elements", color: .green)
     }
 }
 

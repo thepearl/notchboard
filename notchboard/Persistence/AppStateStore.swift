@@ -25,31 +25,36 @@ struct PersistedAppState: Codable, Equatable {
     var workspace: NBWorkspace
     var autoReleaseMinutes: Int
     var startExpanded: Bool
-    var liveSyncEnabled: Bool
     var deeplinkScheme: String
     var dockEdge: NBDockEdge
     var onboardingCompleted: Bool
     var onboardingName: String
+    /// Onboarding finished while Simulator wasn't running — show the coach mark the first
+    /// time it appears, even across a relaunch.
+    var coachMarkPending: Bool
+    var hotKeyModifier: NBHotKeyModifier
 
     init(
         workspace: NBWorkspace,
         autoReleaseMinutes: Int,
         startExpanded: Bool,
-        liveSyncEnabled: Bool,
         deeplinkScheme: String,
         dockEdge: NBDockEdge,
         onboardingCompleted: Bool,
-        onboardingName: String
+        onboardingName: String,
+        coachMarkPending: Bool = false,
+        hotKeyModifier: NBHotKeyModifier = .control
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.workspace = workspace
         self.autoReleaseMinutes = autoReleaseMinutes
         self.startExpanded = startExpanded
-        self.liveSyncEnabled = liveSyncEnabled
         self.deeplinkScheme = deeplinkScheme
         self.dockEdge = dockEdge
         self.onboardingCompleted = onboardingCompleted
         self.onboardingName = onboardingName
+        self.coachMarkPending = coachMarkPending
+        self.hotKeyModifier = hotKeyModifier
     }
 
     /// Settings decode leniently (missing keys fall back to defaults) so adding a field
@@ -61,11 +66,12 @@ struct PersistedAppState: Codable, Equatable {
         workspace = try container.decode(NBWorkspace.self, forKey: .workspace)
         autoReleaseMinutes = try container.decodeIfPresent(Int.self, forKey: .autoReleaseMinutes) ?? 60
         startExpanded = try container.decodeIfPresent(Bool.self, forKey: .startExpanded) ?? true
-        liveSyncEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveSyncEnabled) ?? true
         deeplinkScheme = try container.decodeIfPresent(String.self, forKey: .deeplinkScheme) ?? ""
         dockEdge = try container.decodeIfPresent(NBDockEdge.self, forKey: .dockEdge) ?? .right
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
         onboardingName = try container.decodeIfPresent(String.self, forKey: .onboardingName) ?? ""
+        coachMarkPending = try container.decodeIfPresent(Bool.self, forKey: .coachMarkPending) ?? false
+        hotKeyModifier = try container.decodeIfPresent(NBHotKeyModifier.self, forKey: .hotKeyModifier) ?? .control
     }
 }
 
@@ -73,8 +79,10 @@ enum AppStateStore {
     private static let logger = Logger(subsystem: "flourix.notchboard", category: "persistence")
 
     /// What a secret field's value looks like inside state.json — the real value lives in
-    /// the Keychain under "<elementID>.<fieldKey>".
-    private static let keychainPlaceholder = "◆keychain◆"
+    /// the Keychain under "<elementID>.<fieldKey>". Internal (not private) because the
+    /// sentinel is in-band with user data: the forms reject it as an entered value, which
+    /// is the cheap honest fix for the collision.
+    static let keychainPlaceholder = "◆keychain◆"
 
     private static let saveDebounce: Duration = .milliseconds(500)
     private static var pendingSave: Task<Void, Never>?
@@ -95,11 +103,34 @@ enum AppStateStore {
     /// Loads previously persisted state, if any. Returns `nil` on first run. An existing
     /// but unreadable/corrupt file is moved aside to state.json.corrupt (so the data is
     /// recoverable and the failure is visible) before treating this as a first launch.
+    /// True when a previous launch moved an unreadable state file aside. Callers that do
+    /// destructive cleanup keyed off "what the current workspace references" (the Keychain
+    /// orphan sweep) should skip it while a recoverable backup exists.
+    static var corruptBackupExists: Bool {
+        FileManager.default.fileExists(atPath: corruptBackupURL.path)
+    }
+
     static func load() -> PersistedAppState? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
         do {
             let data = try Data(contentsOf: fileURL)
             var state = try JSONDecoder().decode(PersistedAppState.self, from: data)
+
+            // A file written by a newer build decodes best-effort here (unknown keys are
+            // dropped) and the next save re-stamps the current schema version — silently
+            // discarding whatever the newer schema stored. Keep a copy so that downgrade
+            // is recoverable instead of invisible.
+            if state.schemaVersion > PersistedAppState.currentSchemaVersion {
+                let backupURL = directoryURL.appendingPathComponent("state.json.v\(state.schemaVersion)")
+                try? FileManager.default.removeItem(at: backupURL)
+                try? FileManager.default.copyItem(at: fileURL, to: backupURL)
+                logger.warning("state.json has newer schema \(state.schemaVersion) (this build: \(PersistedAppState.currentSchemaVersion)); backed up before best-effort load")
+            }
+
+            // Duplicate element IDs (hand-edited file) collide in the Keychain and break
+            // SwiftUI identity — resolve them before the placeholder swap, so the first
+            // occurrence keeps its ID and its stored secret.
+            state.workspace.deduplicateElementIDs()
             state.workspace = restoringSecrets(into: state.workspace)
             return state
         } catch {
@@ -142,41 +173,43 @@ enum AppStateStore {
     /// Moves every secret-typed value into the Keychain and leaves a placeholder in the
     /// returned workspace, so the JSON on disk never contains a secret.
     private static func strippingSecrets(from workspace: NBWorkspace) -> NBWorkspace {
-        var stripped = workspace
-        for (groupID, group) in workspace.groups {
-            let secretKeys = group.secretFieldKeys
-            guard !secretKeys.isEmpty else { continue }
-            var group = group
-            for index in group.elements.indices {
-                for fieldKey in secretKeys {
-                    guard let value = group.elements[index].values[fieldKey],
-                          !value.isEmpty, value != keychainPlaceholder else { continue }
-                    SecretsStore.save(value, for: "\(group.elements[index].id).\(fieldKey)")
-                    group.elements[index].values[fieldKey] = keychainPlaceholder
-                }
+        workspace.mappingSecretValues { elementID, fieldKey, value in
+            guard value != keychainPlaceholder else { return value }
+            let key = "\(elementID).\(fieldKey)"
+            if value.isEmpty {
+                // A blanked secret must leave the Keychain too — otherwise the scrubbed
+                // value stays readable under the old account key forever.
+                SecretsStore.delete(for: key)
+                return value
             }
-            stripped.groups[groupID] = group
+            if SecretsStore.save(value, for: key) {
+                return keychainPlaceholder
+            }
+            // The Keychain write failed (locked, denied). Persisting the placeholder
+            // anyway would point at nothing and resolve to "" on the next launch —
+            // permanent loss. Keep the raw value in the JSON until a later save lands;
+            // the file is local-only and this is the lesser evil.
+            logger.error("keychain write failed for \(key, privacy: .public); keeping value in state.json until a save lands")
+            return value
         }
-        return stripped
     }
 
     /// Reverse of `strippingSecrets`: swaps placeholders back for the real Keychain values.
     /// A placeholder with no matching Keychain item resolves to an empty string.
     private static func restoringSecrets(into workspace: NBWorkspace) -> NBWorkspace {
-        var restored = workspace
-        for (groupID, group) in workspace.groups {
-            let secretKeys = group.secretFieldKeys
-            guard !secretKeys.isEmpty else { continue }
-            var group = group
-            for index in group.elements.indices {
-                for fieldKey in secretKeys {
-                    guard group.elements[index].values[fieldKey] == keychainPlaceholder else { continue }
-                    let stored = SecretsStore.load(for: "\(group.elements[index].id).\(fieldKey)")
-                    group.elements[index].values[fieldKey] = stored ?? ""
-                }
+        workspace.mappingSecretValues { elementID, fieldKey, value in
+            guard value == keychainPlaceholder else { return value }
+            switch SecretsStore.load(for: "\(elementID).\(fieldKey)") {
+            case .found(let stored):
+                return stored
+            case .notFound:
+                return ""
+            case .failure:
+                // Read error (keychain locked/denied) — keep the placeholder. The save
+                // path skips placeholders and never deletes their entries, so the real
+                // secret survives the transient failure.
+                return value
             }
-            restored.groups[groupID] = group
         }
-        return restored
     }
 }

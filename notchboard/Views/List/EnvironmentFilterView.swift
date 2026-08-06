@@ -41,13 +41,16 @@ struct EnvChip: View {
             .padding(.vertical, 5)
             .background(isActive ? activeColor.opacity(0.08) : Color.clear)
             .overlay(
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
                     .stroke(hovering ? activeColor : (isActive ? activeColor : NBColor.border), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
             .onHover { hovering = $0 }
+            // Chips carry their own active/hover styling; a system focus ring on top of it
+            // just looked like a stray blue rectangle.
+            .focusEffectDisabled()
     }
 }
 

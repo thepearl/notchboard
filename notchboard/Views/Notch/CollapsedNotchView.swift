@@ -10,9 +10,19 @@ import SwiftUI
 
 struct CollapsedNotchView: View {
     let claimedCount: Int
+    var edge: NBDockEdge = .right
     let onTap: () -> Void
 
     @State private var isHovering = false
+
+    /// The flat side faces the Simulator window; only the outward corners round, and the
+    /// shadow falls away from the window. Docked right of Simulator that means flat
+    /// leading / rounded trailing; docked left it's mirrored.
+    private var notchShape: UnevenRoundedRectangle {
+        edge == .right
+            ? UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: 6, topTrailingRadius: 6)
+            : UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 6, bottomTrailingRadius: 0, topTrailingRadius: 0)
+    }
 
     var body: some View {
         VStack(spacing: 7) {
@@ -27,19 +37,16 @@ struct CollapsedNotchView: View {
                 .fixedSize()
                 .frame(width: 12)
 
-            Text("»")
+            Text(edge == .right ? "»" : "«")
                 .font(NBFont.mono(9))
                 .foregroundStyle(NBColor.textSecondary)
         }
         .padding(.vertical, 11)
         .padding(.horizontal, 7)
-        .background(isHovering ? Color(hex: 0x171a20) : NBColor.chip.opacity(0.9))
-        .overlay(
-            UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: 6, topTrailingRadius: 6)
-                .stroke(isHovering ? NBColor.borderStrong : NBColor.border, lineWidth: 1)
-        )
-        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: 6, topTrailingRadius: 6))
-        .shadow(color: .black.opacity(0.5), radius: 24, x: 6, y: 8)
+        .background(isHovering ? NBColor.rowHover : NBColor.chip.opacity(0.9))
+        .overlay(notchShape.stroke(isHovering ? NBColor.borderStrong : NBColor.border, lineWidth: 1))
+        .clipShape(notchShape)
+        .shadow(color: .black.opacity(0.5), radius: 24, x: edge == .right ? 6 : -6, y: 8)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .onHover { isHovering = $0 }
@@ -47,10 +54,18 @@ struct CollapsedNotchView: View {
     }
 }
 
-#Preview {
+#Preview("Docked right") {
     ZStack {
         NBColor.background
         CollapsedNotchView(claimedCount: 3, onTap: {})
+    }
+    .frame(width: 200, height: 260)
+}
+
+#Preview("Docked left") {
+    ZStack {
+        NBColor.background
+        CollapsedNotchView(claimedCount: 3, edge: .left, onTap: {})
     }
     .frame(width: 200, height: 260)
 }

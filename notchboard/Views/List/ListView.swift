@@ -40,16 +40,22 @@ struct ListView: View {
             }
             .background(NBColor.field)
             .overlay(
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
                     .stroke(NBColor.borderSubtle, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
             ListFooterView(viewModel: viewModel)
         }
+        // Focusable so the arrow keys and Return reach `onKeyPress`, but without the system
+        // focus ring: this view wraps the entire list, so AppKit drew a blue rounded rectangle
+        // around the whole panel body the moment anything inside it was clicked — including
+        // the env chips. The keyboard-selected row has its own amber outline, which is the
+        // focus affordance this design wants.
         .focusable()
+        .focusEffectDisabled()
         .onKeyPress(.downArrow) { viewModel.moveKeyboardSelection(1); return .handled }
         .onKeyPress(.upArrow) { viewModel.moveKeyboardSelection(-1); return .handled }
         .onKeyPress(.return) { viewModel.openKeyboardSelection() ? .handled : .ignored }
@@ -61,20 +67,21 @@ private struct ListFooterView: View {
 
     var body: some View {
         HStack {
+            // No fake "sync Ns ago" freshness — there is no sync in this local build.
             HStack(spacing: 0) {
                 Text("\(viewModel.claimedCount) claimed").foregroundStyle(NBColor.green)
-                Text(" · sync 0.4s ago").foregroundStyle(NBColor.textSecondary)
+                Text(" · local").foregroundStyle(NBColor.textSecondary)
             }
             .font(NBFont.mono(9.5))
 
             Spacer()
 
             Button(action: viewModel.openAdd) {
-                Text("＋ new \(viewModel.activeGroup.singular) ⌘N")
+                Text("＋ new \(viewModel.activeGroup.singular) \(viewModel.hotKeyModifier.symbolPrefix)N")
                     .font(NBFont.mono(9.5))
                     .foregroundStyle(NBColor.amber)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

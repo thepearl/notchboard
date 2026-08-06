@@ -36,10 +36,10 @@ private struct ToastRow: View {
         .padding(.vertical, 10)
         .background(NBColor.chip)
         .overlay(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: NBMetrics.toastCornerRadius)
                 .stroke(NBColor.border, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.toastCornerRadius))
         .shadow(color: .black.opacity(0.6), radius: 34, y: 14)
     }
 }

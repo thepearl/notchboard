@@ -25,16 +25,18 @@ struct CoachMarkView: View {
                     .foregroundStyle(NBColor.amber)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
             .padding(.top, 4)
         }
         .padding(13)
-        .frame(width: 198)
+        // Must match the width AppDelegate sizes the notchWithCoachMark panel with —
+        // one constant, read by both.
+        .frame(width: NBMetrics.coachMarkWidth)
         .background(NBColor.chip)
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(NBColor.amber.opacity(0.5), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: NBMetrics.cardCornerRadius).stroke(NBColor.amber.opacity(0.5), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.cardCornerRadius))
         .shadow(color: .black.opacity(0.7), radius: 50, y: 20)
     }
 }

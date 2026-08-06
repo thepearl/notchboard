@@ -22,13 +22,7 @@ struct AddElementView: View {
 
     private var header: some View {
         HStack(spacing: 9) {
-            Button(action: viewModel.backToList) {
-                Text("←")
-                    .font(NBFont.ui(13))
-                    .foregroundStyle(NBColor.textSecondary)
-                    .padding(4)
-            }
-            .buttonStyle(.plain)
+            NBBackButton(action: viewModel.backToList)
             Text(viewModel.editingElementID == nil ? "new \(viewModel.activeGroup.singular)" : "edit \(viewModel.activeGroup.singular)")
                 .font(NBFont.ui(13, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
@@ -79,18 +73,18 @@ struct AddElementView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
                     .background(NBColor.amber)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
 
             Button(action: viewModel.backToList) {
                 Text("cancel")
                     .font(NBFont.ui(11))
                     .foregroundStyle(NBColor.textSecondaryAlt)
                     .frame(width: 80, height: 36)
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.border, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.border, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
         }
     }
 }
@@ -123,8 +117,8 @@ struct NBTextField: View {
             .padding(.horizontal, 10)
             .frame(height: 34)
             .background(NBColor.field)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(focused ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(focused ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             .focused($focused)
     }
 }
@@ -154,7 +148,7 @@ struct NBTextEditor: View {
         }
         .frame(height: 52)
         .background(NBColor.field)
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(focused ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(focused ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
     }
 }

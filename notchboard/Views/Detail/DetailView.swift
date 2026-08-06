@@ -26,20 +26,14 @@ struct DetailView: View {
 
     private var claimLine: (text: String, color: Color) {
         if let claim = element.claimedBy {
-            return ("● claimed by \(viewModel.memberName(claim.who).lowercased()) · \(claim.minutesAgo)m", NBColor.green)
+            return ("● claimed by \(viewModel.memberName(claim.who).lowercased()) · \(claim.ageLabel)", NBColor.green)
         }
         return ("○ free", NBColor.textSecondary)
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 9) {
-            Button(action: viewModel.backToList) {
-                Text("←")
-                    .font(NBFont.ui(13))
-                    .foregroundStyle(NBColor.textSecondary)
-                    .padding(4)
-            }
-            .buttonStyle(.plain)
+            NBBackButton(action: viewModel.backToList)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -53,7 +47,7 @@ struct DetailView: View {
                             .font(NBFont.ui(11))
                             .foregroundStyle(element.isFavorite ? NBColor.amber : NBColor.textMuted)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nbPlain)
                 }
                 Text(claimLine.text)
                     .font(NBFont.mono(9))
@@ -67,7 +61,7 @@ struct DetailView: View {
                 .foregroundStyle(element.env.color)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(element.env.color.opacity(0.35), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(element.env.color.opacity(0.35), lineWidth: 1))
         }
     }
 
@@ -90,36 +84,12 @@ struct DetailView: View {
                 )
             }
 
-            // note (always present, not part of schema)
-            HStack(alignment: .top, spacing: 8) {
-                Text("note")
-                    .font(NBFont.mono(8))
-                    .foregroundStyle(NBColor.textMuted)
-                    .frame(width: 66, alignment: .leading)
-                Text(element.note.isEmpty ? "—" : element.note)
-                    .font(NBFont.mono(10))
-                    .foregroundStyle(NBColor.textSecondaryAlt)
-                    .lineLimit(nil)
-            }
-            .padding(11)
-            .background(NBColor.field)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-
-            // last used
-            HStack(spacing: 8) {
-                Text("last used")
-                    .font(NBFont.mono(8))
-                    .foregroundStyle(NBColor.textMuted)
-                    .frame(width: 66, alignment: .leading)
-                Text(element.lastUsed)
-                    .font(NBFont.mono(10))
-                    .foregroundStyle(NBColor.textSecondaryAlt)
-            }
-            .padding(11)
-            .background(NBColor.field)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            // note and last used are always present, not part of the schema. They go through
+            // the same row container as the schema fields so their width can't drift from
+            // them — previously they shrink-wrapped their text while the schema rows filled
+            // the panel, which read as a layout bug.
+            MetaRow(label: "note", value: element.note.isEmpty ? "—" : element.note, wraps: true)
+            MetaRow(label: "last used", value: element.lastUsed, wraps: false)
         }
         .padding(.top, 17)
     }
@@ -151,10 +121,10 @@ struct DetailView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 36)
                         .background(claimButtonStyle.bg)
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(claimButtonStyle.border, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(claimButtonStyle.border, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
 
                 if viewModel.loginUsername(for: element) != nil {
                     Button {
@@ -165,9 +135,9 @@ struct DetailView: View {
                             .foregroundStyle(NBColor.textFieldValue)
                             .frame(maxWidth: .infinity)
                             .frame(height: 36)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.border, lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.border, lineWidth: 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nbPlain)
                 }
             }
 
@@ -190,9 +160,26 @@ struct DetailView: View {
                         .foregroundStyle(NBColor.amber)
                         .frame(maxWidth: .infinity)
                         .frame(height: 32)
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
+                .padding(.top, 2)
+            }
+
+            // Second entry point for notify-when-free (the row tooltip is the other) —
+            // useful exactly when someone opened the detail hoping to use the element.
+            if let claim = element.claimedBy, claim.who != "you" {
+                Button {
+                    viewModel.notifyWhenFree(element)
+                } label: {
+                    Text("🔔 notify me when it's free")
+                        .font(NBFont.ui(11))
+                        .foregroundStyle(NBColor.amber)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                }
+                .buttonStyle(.nbPlain)
                 .padding(.top, 2)
             }
 
@@ -204,7 +191,7 @@ struct DetailView: View {
                         .font(NBFont.mono(9))
                         .foregroundStyle(NBColor.textSecondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
                 .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)
 
                 Button {
@@ -218,11 +205,38 @@ struct DetailView: View {
                         .font(NBFont.mono(9))
                         .foregroundStyle(NBColor.red.opacity(confirmingDelete ? 1 : 0.7))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
             }
             .padding(.top, 8)
         }
         .padding(.top, 18)
+    }
+}
+
+/// A read-only label/value row (note, last used) matching the schema field rows' geometry.
+private struct MetaRow: View {
+    let label: String
+    let value: String
+    /// Notes can run to several lines; single-value rows stay on one.
+    let wraps: Bool
+
+    var body: some View {
+        HStack(alignment: wraps ? .top : .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(NBFont.mono(8))
+                .foregroundStyle(NBColor.textMuted)
+                .frame(width: 66, alignment: .leading)
+            Text(value)
+                .font(NBFont.mono(10))
+                .foregroundStyle(NBColor.textSecondaryAlt)
+                .lineLimit(wraps ? nil : 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(11)
+        .background(NBColor.field)
+        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -254,7 +268,7 @@ private struct FieldRow: View {
                         .font(NBFont.mono(9))
                         .foregroundStyle(NBColor.textDim)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
             }
             Text("⧉")
                 .font(NBFont.mono(9))
@@ -262,8 +276,8 @@ private struct FieldRow: View {
         }
         .padding(11)
         .background(NBColor.field)
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(hovering ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(hovering ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture(perform: onCopy)

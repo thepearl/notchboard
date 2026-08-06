@@ -18,6 +18,5 @@ enum NBMetrics {
     static let notchHeight: CGFloat = 150
     static let coachMarkWidth: CGFloat = 198
 
-    static let simulatorWidth: CGFloat = 300
-    static let simulatorHeight: CGFloat = 600
+    static let toastCornerRadius: CGFloat = 5
 }

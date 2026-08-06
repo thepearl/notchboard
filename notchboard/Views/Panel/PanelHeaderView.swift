@@ -7,7 +7,7 @@ import SwiftUI
 
 struct PanelHeaderView: View {
     let workspaceName: String
-    let onlineCount: Int
+    let memberCount: Int
     let onCollapse: () -> Void
 
     @State private var collapseHovering = false
@@ -29,12 +29,11 @@ struct PanelHeaderView: View {
 
             Spacer()
 
-            HStack(spacing: 4) {
-                Circle().fill(NBColor.green).frame(width: 5, height: 5)
-                Text("\(onlineCount) online")
-                    .font(NBFont.mono(9))
-                    .foregroundStyle(NBColor.green)
-            }
+            // Member count, not "online" — presence doesn't exist without a backend, and
+            // the header shouldn't pretend it does.
+            Text("\(memberCount) members")
+                .font(NBFont.mono(9))
+                .foregroundStyle(NBColor.textSecondary)
 
             Button(action: onCollapse) {
                 Text("«")
@@ -43,11 +42,11 @@ struct PanelHeaderView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 3)
+                        RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
                             .stroke(collapseHovering ? NBColor.borderStrong : NBColor.border, lineWidth: 1)
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
             .onHover { collapseHovering = $0 }
             .help("collapse to notch")
         }
@@ -64,6 +63,6 @@ struct PanelHeaderView: View {
 }
 
 #Preview {
-    PanelHeaderView(workspaceName: "acme-mobile", onlineCount: 4, onCollapse: {})
+    PanelHeaderView(workspaceName: "acme-mobile", memberCount: 4, onCollapse: {})
         .background(NBColor.panel)
 }

@@ -28,6 +28,10 @@ final class NotchboardViewModel {
     // MARK: Chrome
     var isExpanded: Bool = true
     var showCoachMark: Bool = false
+    /// Set when onboarding finishes while Simulator isn't running: the coach mark is
+    /// deferred until Simulator first appears instead of being silently skipped — the
+    /// unexplained 28pt notch was the only thing a Simulator-less onboarder ever saw.
+    var pendingCoachMark: Bool = false
 
     // MARK: Data
     var workspace: NBWorkspace = MockData.workspace()
@@ -38,6 +42,10 @@ final class NotchboardViewModel {
     var environmentFilter: NBEnvironment = .all
     var searchText: String = ""
     var tooltipElementID: String?
+    /// Pending grace-period dismissal of the claim tooltip. The popover renders *below*
+    /// the badge, so the cursor must leave the badge to reach the "notify when free"
+    /// button — an immediate onLeave dismissal made that button unreachable by mouse.
+    @ObservationIgnored private var tooltipDismissTask: Task<Void, Never>?
     /// The row highlighted for keyboard navigation in the list (arrows/return). Distinct
     /// from the tooltip and from the open detail view.
     var keyboardSelectionID: String?
@@ -67,14 +75,20 @@ final class NotchboardViewModel {
     var toasts: [NBToast] = []
 
     // MARK: Settings (mirrors the prototype's configurable props)
+    /// Allowed auto-release window — the single definition shared by the Settings stepper
+    /// and the restore-time clamp.
+    static let autoReleaseRange = 5...240
     var autoReleaseMinutes: Int = 60
     var startExpanded: Bool = true
-    var liveSyncEnabled: Bool = true
     /// The target app's debug URL scheme for "login on sim" — e.g. "brewly" fires
     /// brewly://debug/login?user=…. Empty means the deeplink bridge is unconfigured.
     var deeplinkScheme: String = ""
     /// Which edge of the Simulator window the notch/panel docks to.
     var dockEdge: NBDockEdge = .right
+    /// Modifier for the global K/N chords. Control by default: ⌃K/⌃N collide only with the
+    /// emacs-style text bindings most people never use, whereas ⌘N is New File in Xcode.
+    /// See NBHotKeyModifier for the full tradeoff.
+    var hotKeyModifier: NBHotKeyModifier = .control
 
     // MARK: Global shortcuts (⌘K / ⌘N — see AppDelegate's global NSEvent monitor)
     /// Bumped whenever the global ⌘K shortcut fires; the search field observes this and
@@ -101,11 +115,12 @@ final class NotchboardViewModel {
             workspace: workspace,
             autoReleaseMinutes: autoReleaseMinutes,
             startExpanded: startExpanded,
-            liveSyncEnabled: liveSyncEnabled,
             deeplinkScheme: deeplinkScheme,
             dockEdge: dockEdge,
             onboardingCompleted: onboardingCompleted,
-            onboardingName: onboardingName
+            onboardingName: onboardingName,
+            coachMarkPending: pendingCoachMark,
+            hotKeyModifier: hotKeyModifier
         )
     }
 
@@ -124,12 +139,16 @@ final class NotchboardViewModel {
         if workspace.groups[activeGroupID] == nil {
             activeGroupID = workspace.groupOrder.first ?? ""
         }
-        autoReleaseMinutes = persisted.autoReleaseMinutes
+        // The Settings stepper enforces this range only for UI-driven changes; the JSON is
+        // hand-editable, and an out-of-range value (0, negative) would auto-release every
+        // claim within one 30s sweep.
+        autoReleaseMinutes = persisted.autoReleaseMinutes.clamped(to: Self.autoReleaseRange)
         startExpanded = persisted.startExpanded
-        liveSyncEnabled = persisted.liveSyncEnabled
         deeplinkScheme = persisted.deeplinkScheme
         dockEdge = persisted.dockEdge
         isExpanded = persisted.startExpanded
+        pendingCoachMark = persisted.coachMarkPending
+        hotKeyModifier = persisted.hotKeyModifier
     }
 
     // MARK: - Derived
@@ -140,6 +159,15 @@ final class NotchboardViewModel {
         // Read on nearly every render — an inconsistent workspace must degrade to an empty
         // group, never trap.
         return NBGroup(id: "", label: "elements", singular: "element", secondaryKey: "", fields: [], elements: [])
+    }
+
+    /// The dictionary key `activeGroup` actually resolves to, or nil when the workspace has
+    /// no groups at all. Mutating writes must go through this — writing through a stale
+    /// `activeGroupID` would mint a phantom group under a bogus key (for example "" after
+    /// the last group is deleted), which the group editor then refuses to touch.
+    private var resolvedActiveGroupID: String? {
+        if workspace.groups[activeGroupID] != nil { return activeGroupID }
+        return workspace.groupOrder.first { workspace.groups[$0] != nil }
     }
 
     var claimedCount: Int {
@@ -195,6 +223,17 @@ final class NotchboardViewModel {
     }
 
     func openAdd() {
+        // With no groups there is nowhere to put an element — surface why instead of
+        // opening a schema-less form whose save would go nowhere.
+        guard resolvedActiveGroupID != nil else {
+            toast("create a group first", color: .red)
+            return
+        }
+        // Re-invoking while the create form is already open (a repeated ⌘N, the footer
+        // button) must not wipe what the user has typed. A fresh form is only set up when
+        // coming from anywhere else — including an in-progress edit, whose values must
+        // never leak into a new element.
+        if currentView == .add && editingElementID == nil { return }
         editingElementID = nil
         addName = ""
         addValues = [:]
@@ -274,6 +313,34 @@ final class NotchboardViewModel {
     func toggleExpanded() {
         isExpanded.toggle()
         showCoachMark = false
+        pendingCoachMark = false // the user found the notch themselves
+    }
+
+    // MARK: - Actions: claim tooltip
+
+    func showClaimTooltip(_ elementID: String) {
+        tooltipDismissTask?.cancel()
+        tooltipElementID = elementID
+    }
+
+    /// Dismisses after a short grace period so the cursor can travel from the badge into
+    /// the popover. Entering the popover (or re-entering the badge) cancels it.
+    func scheduleClaimTooltipDismissal() {
+        tooltipDismissTask?.cancel()
+        tooltipDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            self?.tooltipElementID = nil
+        }
+    }
+
+    func cancelClaimTooltipDismissal() {
+        tooltipDismissTask?.cancel()
+    }
+
+    func dismissClaimTooltip() {
+        tooltipDismissTask?.cancel()
+        tooltipElementID = nil
     }
 
     // MARK: - Actions: element mutation
@@ -294,10 +361,12 @@ final class NotchboardViewModel {
                 didFreeElement(group.elements[idx])
                 toast("released “\(element.name)”", color: .green)
             } else {
-                toast("\(memberName(claim.who)) has this — ping them or claim anyway", color: .red)
+                // No force-claim exists in this local build — don't advertise one.
+                toast("\(memberName(claim.who)) has this — coordinate before using", color: .red)
             }
         } else {
             group.elements[idx].claimedBy = NBClaim(who: "you")
+            group.elements[idx].lastUsed = "just now, by you"
             workspace.groups[activeGroupID] = group
             copyPrimaryField(of: element)
         }
@@ -329,6 +398,13 @@ final class NotchboardViewModel {
         toast("“\(element.name)” is now free", color: .green)
     }
 
+    /// Clears a concealed copy off the pasteboard after this window, unless the user has
+    /// copied something else since. The concealed-type hint only protects against
+    /// cooperating clipboard managers; the plaintext itself would otherwise sit on the
+    /// general pasteboard indefinitely.
+    private static let concealedPasteboardLifetime: Duration = .seconds(60)
+    @ObservationIgnored private var pasteboardClearTask: Task<Void, Never>?
+
     func copy(_ text: String, label: String, concealed: Bool = false) {
         #if canImport(AppKit)
         let pasteboard = NSPasteboard.general
@@ -338,6 +414,19 @@ final class NotchboardViewModel {
             // Standard hint (nspasteboard.org) telling clipboard managers not to record
             // this entry — used for secret-typed field values.
             pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+
+            let changeCount = pasteboard.changeCount
+            pasteboardClearTask?.cancel()
+            pasteboardClearTask = Task {
+                try? await Task.sleep(for: Self.concealedPasteboardLifetime)
+                guard !Task.isCancelled else { return }
+                let current = NSPasteboard.general
+                // Only clear if our copy is still the pasteboard's content — never wipe
+                // something the user copied afterwards.
+                if current.changeCount == changeCount {
+                    current.clearContents()
+                }
+            }
         }
         #endif
         toast("\(label) copied to clipboard", color: .amber)
@@ -390,6 +479,25 @@ final class NotchboardViewModel {
         return scheme.trimmingCharacters(in: CharacterSet(charactersIn: ":/. "))
     }
 
+    /// Network schemes that would turn the credential deeplink into a web request. A user
+    /// pasting their app's universal link ("https://app.example.com") into Settings must
+    /// not end up firing username+password as GET parameters at a real host.
+    private static let networkSchemes: Set<String> = ["http", "https", "ftp", "file", "ws", "wss"]
+
+    /// True when `scheme` matches the URL-scheme grammar (letter, then letters/digits/
+    /// "+"/"-"/".") and is not a network scheme.
+    static func isValidDeeplinkScheme(_ scheme: String) -> Bool {
+        guard !networkSchemes.contains(scheme.lowercased()) else { return false }
+        guard let first = scheme.first, first.isASCII, first.isLetter else { return false }
+        return scheme.allSatisfy { character in
+            character.isASCII && (character.isLetter || character.isNumber || character == "+" || character == "-" || character == ".")
+        }
+    }
+
+    /// Injection point for tests — fires the deeplink into the simulator. Production uses
+    /// the real simctl bridge.
+    @ObservationIgnored var deeplinkOpener: (_ url: String, _ completion: @escaping (SimctlBridge.Failure?) -> Void) -> Void = SimctlBridge.openURL
+
     func loginOnSim(_ element: NBElement) {
         guard let username = loginUsername(for: element) else {
             deeplinkLog.error("login on sim: element “\(element.name, privacy: .public)” has no username field")
@@ -399,6 +507,11 @@ final class NotchboardViewModel {
         guard !scheme.isEmpty else {
             deeplinkLog.error("login on sim: no debug URL scheme configured in settings")
             toast("set your app's debug URL scheme in settings first", color: .red)
+            return
+        }
+        guard Self.isValidDeeplinkScheme(scheme) else {
+            deeplinkLog.error("login on sim: “\(scheme, privacy: .public)” is not a usable custom scheme")
+            toast("“\(scheme)” isn't a custom URL scheme — set your app's debug scheme in settings", color: .red)
             return
         }
         deeplinkLog.log("login on sim: firing \(scheme, privacy: .public)://debug/login for “\(element.name, privacy: .public)” (password \(self.loginPassword(for: element) != nil ? "included" : "absent", privacy: .public))")
@@ -412,8 +525,12 @@ final class NotchboardViewModel {
             query += "&pass=\(encodedPass)"
         }
 
+        // Capture the element's owning group now: the simctl round-trip takes ~0.5-2s, and
+        // resolving through activeGroupID at callback time silently dropped the auto-claim
+        // whenever the user switched tabs mid-flight (while still toasting success).
+        guard let owningGroupID = resolvedActiveGroupID else { return }
         let wasFree = element.claimedBy == nil
-        SimctlBridge.openURL("\(scheme)://debug/login?\(query)") { [weak self] failure in
+        deeplinkOpener("\(scheme)://debug/login?\(query)") { [weak self] failure in
             guard let self else { return }
             if let failure {
                 // The deeplink never fired — don't leave the element falsely claimed.
@@ -422,8 +539,11 @@ final class NotchboardViewModel {
             }
             // Logging in as this account is de facto using it — auto-claim if it was free
             // (vision §5.3), but only now that the deeplink actually succeeded.
-            if wasFree, self.selectedElement(id: element.id)?.claimedBy == nil {
-                self.mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
+            if wasFree, self.element(element.id, in: owningGroupID)?.claimedBy == nil {
+                self.mutate(element.id, in: owningGroupID) {
+                    $0.claimedBy = NBClaim(who: "you")
+                    $0.lastUsed = "just now, by you"
+                }
             }
             self.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
         }
@@ -446,7 +566,10 @@ final class NotchboardViewModel {
 
         switch selectedElement(id: element.id)?.claimedBy?.who {
         case nil:
-            mutate(element.id) { $0.claimedBy = NBClaim(who: "you") }
+            mutate(element.id) {
+                $0.claimedBy = NBClaim(who: "you")
+                $0.lastUsed = "just now, by you"
+            }
             toast("marked “\(element.name)” in use", color: .green)
         case "you":
             break // already yours; the copy toast is enough
@@ -476,10 +599,22 @@ final class NotchboardViewModel {
     }
 
     private func mutate(_ elementID: String, _ change: (inout NBElement) -> Void) {
-        guard var group = workspace.groups[activeGroupID],
+        mutate(elementID, in: activeGroupID, change)
+    }
+
+    /// Mutates an element inside an explicit group — used by async completions, which must
+    /// address the element's *owning* group rather than whatever group is active by the
+    /// time they fire.
+    private func mutate(_ elementID: String, in groupID: String, _ change: (inout NBElement) -> Void) {
+        guard var group = workspace.groups[groupID],
               let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
         change(&group.elements[idx])
-        workspace.groups[activeGroupID] = group
+        workspace.groups[groupID] = group
+    }
+
+    /// Looks an element up in an explicit group (see `mutate(_:in:_:)` for why).
+    private func element(_ elementID: String, in groupID: String) -> NBElement? {
+        workspace.groups[groupID]?.elements.first { $0.id == elementID }
     }
 
     // MARK: - Actions: add/edit element
@@ -488,6 +623,13 @@ final class NotchboardViewModel {
         let trimmedName = addName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             toast("give it a display name first", color: .red)
+            return
+        }
+        // The placeholder is in-band with user data in state.json: a field literally
+        // holding it would be mistaken for a stripped secret on the next load and swap in
+        // stale Keychain data (or nothing). Rejecting it at entry is the honest fix.
+        guard !addValues.values.contains(AppStateStore.keychainPlaceholder) else {
+            toast("that value is reserved by notchboard — pick another", color: .red)
             return
         }
 
@@ -500,21 +642,27 @@ final class NotchboardViewModel {
             }
             editingElementID = nil
             currentView = .detail(elementID: editingID)
-            toast("“\(trimmedName)” updated · synced to team", color: .green)
+            toast("“\(trimmedName)” updated", color: .green)
             return
         }
 
+        // Write through the *resolved* group id: activeGroupID can be stale ("" after the
+        // last group was deleted, or a ghost id), and writing activeGroup's fallback
+        // contents under that stale key would mint a phantom — or duplicated — group.
+        guard let groupID = resolvedActiveGroupID, var group = workspace.groups[groupID] else {
+            toast("create a group first", color: .red)
+            return
+        }
         let element = NBElement(
             id: UUID().uuidString,
             name: trimmedName, env: addEnvironment, isFavorite: false, claimedBy: nil,
             note: addNote.trimmingCharacters(in: .whitespacesAndNewlines),
             lastUsed: "just now, by you", values: addValues
         )
-        var group = activeGroup
         group.elements.append(element)
-        workspace.groups[activeGroupID] = group
+        workspace.groups[groupID] = group
         currentView = .list
-        toast("“\(element.name)” added · synced to team", color: .green)
+        toast("“\(element.name)” added", color: .green)
     }
 
     func deleteElement(_ elementID: String) {
@@ -562,13 +710,7 @@ final class NotchboardViewModel {
             toast("group already exists", color: .red)
             return
         }
-        let fields = newGroupFields
-            .filter { !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { field -> NBField in
-                var f = field
-                f.key = Self.slug(field.label)
-                return f
-            }
+        let fields = Self.normalisedFields(newGroupFields)
         guard let firstField = fields.first else {
             toast("add at least one field", color: .red)
             return
@@ -582,7 +724,7 @@ final class NotchboardViewModel {
         workspace.groupOrder.append(groupID)
         activeGroupID = groupID
         currentView = .list
-        toast("group “\(name)” created · template synced", color: .green)
+        toast("group “\(name)” created", color: .green)
     }
 
     /// Applies the group form to an existing group. Fields that already existed (matched by
@@ -593,15 +735,7 @@ final class NotchboardViewModel {
         guard var group = workspace.groups[groupID] else { return }
 
         let existingByID = Dictionary(uniqueKeysWithValues: group.fields.map { ($0.id, $0) })
-        var usedKeys = Set<String>()
-        var fields: [NBField] = []
-        for field in newGroupFields where !field.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            var f = field
-            f.key = existingByID[field.id]?.key ?? Self.slug(field.label)
-            while usedKeys.contains(f.key) { f.key += "_" }
-            usedKeys.insert(f.key)
-            fields.append(f)
-        }
+        let fields = Self.normalisedFields(newGroupFields, existingByID: existingByID)
         guard let firstField = fields.first else {
             toast("add at least one field", color: .red)
             return
@@ -664,19 +798,11 @@ final class NotchboardViewModel {
             SecretsStore.delete(for: key)
         }
 
-        var clean = imported
-        for (groupID, group) in imported.groups {
-            let secretKeys = group.secretFieldKeys
-            guard !secretKeys.isEmpty else { continue }
-            var group = group
-            for index in group.elements.indices {
-                for key in secretKeys where group.elements[index].values[key] != nil {
-                    group.elements[index].values[key] = ""
-                }
-            }
-            clean.groups[groupID] = group
-        }
+        var clean = imported.mappingSecretValues { _, _, _ in "" }
         clean.reconcileGroupOrder()
+        // Duplicate element IDs in an imported file would collide in the Keychain and make
+        // row actions hit the wrong element — remap them before adopting the workspace.
+        clean.deduplicateElementIDs()
         workspace = clean
         activeGroupID = clean.groupOrder.first ?? ""
         currentView = .list
@@ -685,6 +811,23 @@ final class NotchboardViewModel {
         watchedElementIDs = []
         let count = clean.groups.values.reduce(0) { $0 + $1.elements.count }
         toast("imported “\(clean.name)” · \(count) elements (secrets not included)", color: .green)
+    }
+
+    /// Drops empty-labelled fields, derives keys (preserving the stable key of any field
+    /// that already existed, matched by `NBField.id`), and dedupes colliding keys with a
+    /// trailing underscore. Shared by the create and edit paths — they previously diverged,
+    /// and the create path let "user id" and "user-id" silently share one values slot.
+    static func normalisedFields(_ raw: [NBField], existingByID: [UUID: NBField] = [:]) -> [NBField] {
+        var usedKeys = Set<String>()
+        var fields: [NBField] = []
+        for field in raw where !field.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var f = field
+            f.key = existingByID[field.id]?.key ?? Self.slug(field.label)
+            while usedKeys.contains(f.key) { f.key += "_" }
+            usedKeys.insert(f.key)
+            fields.append(f)
+        }
+        return fields
     }
 
     private static func slug(_ text: String) -> String {
@@ -710,10 +853,12 @@ final class NotchboardViewModel {
 
     // MARK: - Onboarding replay
 
+    /// Resets panel state when onboarding is replayed (the flow itself is owned by
+    /// OnboardingViewModel.reset(); both are invoked together from the menu/Settings).
     func replayOnboarding() {
-        // Handled by parent scene; view model just resets panel state.
         currentView = .list
         showCoachMark = false
+        pendingCoachMark = false
     }
 }
 
@@ -721,6 +866,12 @@ struct NBToast: Identifiable, Equatable {
     let id: UUID
     let message: String
     let color: NBToastColor
+}
+
+private extension Int {
+    func clamped(to range: ClosedRange<Int>) -> Int {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+    }
 }
 
 enum NBToastColor {

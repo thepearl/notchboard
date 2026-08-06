@@ -23,7 +23,7 @@ struct OnboardingView: View {
                                     .font(NBFont.mono(9))
                                     .foregroundStyle(NBColor.textSecondary)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.nbPlain)
                             Spacer()
                         }
                         .padding(.bottom, 8)
@@ -42,17 +42,17 @@ struct OnboardingView: View {
             }
             .frame(width: 468)
             .background(NBColor.panel)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(NBColor.border, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: NBMetrics.panelCornerRadius).stroke(NBColor.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.panelCornerRadius))
             .shadow(color: .black.opacity(0.8), radius: 90, y: 40)
         }
     }
 
     private var titleBar: some View {
         HStack(spacing: 7) {
-            Circle().fill(Color(hex: 0xff5f57)).frame(width: 10, height: 10)
-            Circle().fill(Color(hex: 0xfebc2e)).frame(width: 10, height: 10)
-            Circle().fill(Color(hex: 0x28c840)).frame(width: 10, height: 10)
+            Circle().fill(NBColor.trafficRed).frame(width: 10, height: 10)
+            Circle().fill(NBColor.trafficAmber).frame(width: 10, height: 10)
+            Circle().fill(NBColor.trafficGreen).frame(width: 10, height: 10)
             Spacer()
             Text("notchboard setup")
                 .font(NBFont.mono(9))
@@ -61,7 +61,7 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 30)
-        .background(Color(hex: 0x17191d))
+        .background(NBColor.titleBar)
         .overlay(alignment: .bottom) { Rectangle().fill(NBColor.headerBorder).frame(height: 1) }
     }
 
@@ -132,9 +132,9 @@ private struct WelcomeStep: View {
                     .padding(.horizontal, 24)
                     .frame(height: 36)
                     .background(NBColor.amber)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nbPlain)
             .padding(.top, 20)
             Spacer()
         }
@@ -168,8 +168,8 @@ private struct IdentityStep: View {
                 .padding(.horizontal, 10)
                 .frame(height: 36)
                 .background(NBColor.field)
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 .padding(.top, 5)
 
             HStack(spacing: 10) {
@@ -191,8 +191,8 @@ private struct IdentityStep: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 9)
             .background(NBColor.field)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             .padding(.top, 14)
 
             Spacer()
@@ -206,9 +206,9 @@ private struct IdentityStep: View {
                         .padding(.horizontal, 24)
                         .frame(height: 36)
                         .background(NBColor.amber)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -245,8 +245,8 @@ private struct JoinWorkspaceStep: View {
                 .padding(.horizontal, 10)
                 .frame(height: 36)
                 .background(NBColor.field)
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 .padding(.top, 5)
 
             if onboarding.codeLooksValid {
@@ -262,38 +262,43 @@ private struct JoinWorkspaceStep: View {
                         .font(NBFont.mono(9))
                         .foregroundStyle(NBColor.textSecondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
 
                 Spacer()
 
                 Button(action: onNext) {
-                    Text(onboarding.codeLooksValid ? "join acme-mobile →" : "join →")
+                    Text(onboarding.codeLooksValid ? "join \(Self.joinedWorkspace.name) →" : "join →")
                         .font(NBFont.ui(11.5, weight: .bold))
                         .foregroundStyle(onboarding.codeLooksValid ? NBColor.background : NBColor.textSecondary)
                         .padding(.horizontal, 24)
                         .frame(height: 36)
                         .background(onboarding.codeLooksValid ? NBColor.amber : Color.clear)
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(onboarding.codeLooksValid ? NBColor.amber : NBColor.border, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(onboarding.codeLooksValid ? NBColor.amber : NBColor.border, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    /// The workspace the mock invite code "finds" — the same seed data the app actually
+    /// loads, so the numbers on this card are real rather than a hardcoded lie.
+    private static let joinedWorkspace = MockData.workspace()
+
     private var foundWorkspaceCard: some View {
-        HStack(spacing: 11) {
+        let workspace = Self.joinedWorkspace
+        return HStack(spacing: 11) {
             Rectangle()
                 .fill(NBColor.amber)
                 .frame(width: 26, height: 26)
                 .overlay(Text("A").font(NBFont.ui(12, weight: .bold)).foregroundStyle(NBColor.background))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("acme-mobile")
+                Text(workspace.name)
                     .font(NBFont.ui(12.5, weight: .bold))
                     .foregroundStyle(NBColor.textPrimary)
-                Text("4 members · 3 groups · 21 elements")
+                Text("\(workspace.memberCount) members · \(workspace.groups.count) groups · \(workspace.elementCount) elements")
                     .font(NBFont.mono(8.5))
                     .foregroundStyle(NBColor.textSecondary)
             }
@@ -309,8 +314,8 @@ private struct JoinWorkspaceStep: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(NBColor.green.opacity(0.05))
-        .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.green.opacity(0.3), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.green.opacity(0.3), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
     }
 }
 
@@ -331,6 +336,11 @@ private struct PermissionStep: View {
     @Bindable var onboarding: OnboardingViewModel
     let onNext: () -> Void
 
+    /// The system permission dialog is one-shot: once dismissed, repeated "grant access"
+    /// clicks silently do nothing. After the first request the button becomes "open
+    /// System Settings", which is the only actual way forward at that point.
+    @State private var promptRequested = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("one permission, then we dock")
@@ -343,7 +353,7 @@ private struct PermissionStep: View {
                 .padding(.top, 4)
 
             HStack(spacing: 11) {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: NBMetrics.cardCornerRadius)
                     .fill(NBColor.border)
                     .frame(width: 28, height: 28)
                     .overlay(Text("⚙").font(.system(size: 13)).foregroundStyle(NBColor.textSecondaryAlt))
@@ -365,35 +375,36 @@ private struct PermissionStep: View {
                         .foregroundStyle(NBColor.green)
                 } else {
                     Button {
-                        AccessibilityPermission.requestIfNeeded()
+                        if promptRequested {
+                            AccessibilityPermission.openSystemSettings()
+                        } else {
+                            promptRequested = true
+                            AccessibilityPermission.requestIfNeeded()
+                        }
                     } label: {
-                        Text("grant access")
+                        Text(promptRequested ? "open System Settings" : "grant access")
                             .font(NBFont.mono(9))
                             .foregroundStyle(NBColor.amber)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 3)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nbPlain)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
             .background(NBColor.field)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(NBColor.borderSubtle, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
             .padding(.top, 16)
             .task {
-                // Poll real AX trust status while this step is visible — the user grants
-                // access in System Settings, outside our window, so we can't observe it
-                // via a simple callback.
-                while !onboarding.accessibilityGranted {
-                    onboarding.accessibilityGranted = AccessibilityPermission.isTrusted
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                }
+                await onboarding.pollAccessibility()
             }
 
-            Text("same pattern RocketSim uses — a known, App-Store-approved approach.")
+            Text(promptRequested && !onboarding.accessibilityGranted
+                 ? "flip the Notchboard toggle on in the Accessibility list — this step updates by itself once you do."
+                 : "same pattern RocketSim uses — a known, App-Store-approved approach.")
                 .font(NBFont.mono(9))
                 .foregroundStyle(NBColor.textMuted)
                 .lineSpacing(4)
@@ -410,10 +421,10 @@ private struct PermissionStep: View {
                         .padding(.horizontal, 24)
                         .frame(height: 36)
                         .background(onboarding.accessibilityGranted ? NBColor.amber : Color.clear)
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(onboarding.accessibilityGranted ? NBColor.amber : NBColor.border, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(onboarding.accessibilityGranted ? NBColor.amber : NBColor.border, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nbPlain)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

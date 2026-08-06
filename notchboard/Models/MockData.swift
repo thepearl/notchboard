@@ -10,9 +10,9 @@ import Foundation
 
 enum MockData {
     static let members: [String: NBMember] = [
-        "tom": NBMember(id: "tom", name: "Tom Verhoeven", short: "tom", avatarColorHex: 0x6d5ce6),
-        "sara": NBMember(id: "sara", name: "Sara Kim", short: "sara", avatarColorHex: 0xd65c8b),
-        "mia": NBMember(id: "mia", name: "Mia Novak", short: "mia", avatarColorHex: 0x3a8f6d),
+        "tom": NBMember(id: "tom", name: "Tom Verhoeven"),
+        "sara": NBMember(id: "sara", name: "Sara Kim"),
+        "mia": NBMember(id: "mia", name: "Mia Novak"),
     ]
 
     static func workspace() -> NBWorkspace {
@@ -124,8 +124,7 @@ enum MockData {
             name: "acme-mobile",
             groupOrder: ["users", "products", "promos"],
             groups: ["users": users, "products": products, "promos": promos],
-            members: members,
-            onlineCount: 4
+            members: members
         )
     }
 }

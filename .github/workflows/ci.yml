@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Signing needs a team certificate that CI has no access to, and nothing here needs a
+      # signed binary: the tests are hosted by the app but never launch it as a real agent.
+      - name: Build
+        run: |
+          xcodebuild -project notchboard.xcodeproj \
+            -scheme notchboard \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            build CODE_SIGNING_ALLOWED=NO
+
+      - name: Test
+        run: |
+          xcodebuild -project notchboard.xcodeproj \
+            -scheme notchboard \
+            -destination 'platform=macOS' \
+            test CODE_SIGNING_ALLOWED=NO
+
+  lint:
+    name: SwiftLint
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      # Advisory for now: the config is new, so a warning shouldn't block a PR until the
+      # existing warnings are burned down. Drop --lenient to make warnings fail the job.
+      - name: Lint
+        run: swiftlint lint --lenient --reporter github-actions-logging

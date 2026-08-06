@@ -258,7 +258,7 @@ no real Accessibility API, and no real Simulator control. Building it natively m
 8. Phase 3: `simctl openurl` deeplink bridge + integration docs for target apps.
 9. Menu-bar fallback mode for no-Accessibility / no-Simulator states.
 
-## 13. Implementation status (as of this build)
+## 13. Implementation status (as of 2026-08-06)
 
 This section documents what actually exists in the `notchboard/` Xcode project today, as a
 running log — update it as the build evolves so it stays the source of truth for "what's real
@@ -315,26 +315,82 @@ vs. still vision."
   main thread (a busy Simulator can't freeze the UI) and the top-left→bottom-left coordinate
   flip uses the true primary screen, fixing docking when Simulator lives on a secondary display
   of a different height.
+- **Full CRUD, 2026-07-20.** Elements can be edited and deleted; groups can be renamed, have
+  their schema edited, and be deleted, with element values preserved across a relabel via stable
+  `NBField.id`s. Workspaces export and import as versioned JSON (secrets stripped both ways).
+  Notify-when-free fires a local notification. The list has arrow-key navigation, and there are
+  launch-at-login and dock-edge (left/right) settings.
+- **The `simctl` deeplink bridge is real** (superseding what §13.2 claimed for a while):
+  `Docking/SimctlBridge.swift` runs `xcrun simctl openurl booted <url>`, and `loginOnSim` fires
+  `<scheme>://debug/login?user=…` with the scheme configured in Settings, auto-claiming the
+  element only once the deeplink actually succeeded. `copyAuthAndClaim` is the fallback for
+  logins a deeplink can't drive (SSO/WebView).
+- **The menu-bar fallback is real** (also superseding an outdated §13.2 note): a status item
+  offers expand/collapse, "Show Panel (Undocked)" for when Simulator or Accessibility is
+  unavailable, replay onboarding, export/import, Settings, and quit.
+- **Correctness and hardening pass (2026-08-06, post-audit).** A full audit found 25 verified
+  defects; all are fixed. The ones worth remembering:
+  - The onboarding permission poll swallowed `CancellationError` from `Task.sleep`, so leaving
+    step 4 turned it into a zero-delay main-actor spin for the rest of the session. Cancellation
+    must exit that loop.
+  - Continuous animation in the panel is expensive in a way that is structural, not incidental —
+    see §13.4.
+  - Global shortcuts were rebuilt on Carbon `RegisterEventHotKey` so the chord is genuinely
+    consumed (see §13.5). They are also gated on the panel being genuinely visible, so they
+    can't mutate a hidden panel whose stale state surfaces later, and re-invoking the add form
+    no longer wipes an in-progress draft.
+  - Deleting the last group then adding an element used to mint a phantom group keyed `""` that
+    the group editor then refused to touch. Mutations now resolve the real group id.
+  - A failed Keychain write no longer leaves a placeholder in `state.json` pointing at nothing
+    (that turned a locked keychain into permanent loss of the secret), blanking a secret now
+    deletes its Keychain entry, and orphaned entries are swept at launch.
+  - Field keys are deduped on the create path as well as the edit path — "user id" and "user-id"
+    used to collide into one value slot, and a secret aliased by a text twin was shown in clear.
+  - Imported and hand-edited files get duplicate element IDs remapped and duplicate `groupOrder`
+    entries removed.
+  - The deeplink scheme is validated, so pasting a universal link can no longer fire credentials
+    as query parameters at a real host; the auto-claim resolves the element's owning group
+    captured at fire time, so switching tabs mid-flight no longer drops it.
+  - The panel no longer flashes at the screen corner on launch, the onboarding dialog no longer
+    teleports between displays as the cursor moves, mode-transition animations are no longer
+    cancelled by the reposition timer, the docked frame is clamped to the screen so a fullscreen
+    Simulator can't push the notch off it, and the left dock edge is properly mirrored.
+  - "Notify when free" was unreachable by mouse (the popover dismissed as the cursor travelled
+    toward it) and now has a grace period plus a second entry point in the detail view.
+- **A test target exists** (`notchboardTests`, Swift Testing): 55 tests over the view models,
+  persistence, Keychain round trip, deeplink logic, docking maths, and a guard against
+  reintroducing the idle-animation regression. `xcodebuild … test` runs them, and CI runs build,
+  test, and SwiftLint.
 
 ### 13.2 Deliberate simplifications / known gaps (still local-only)
 
 - **No backend.** Workspace/groups/elements/claims all live in one `@Observable` view model
   seeded from `MockData.swift`. Multiple "teammates" claiming things, presence, and sync are not
-  real yet — see vision §9/§11 for what a real backend needs to cover.
-- **No `simctl` deeplink bridge yet.** The "⚡ login on sim" button just shows a toast
-  acknowledging it's a phase-3 stub, per the original prototype's own phasing.
-- **No menu-bar fallback.** If Accessibility is denied, the panel currently just won't find
-  Simulator and will stay hidden; there's no alternate menu-bar-icon presentation yet (flagged as
-  an explicit open item in both the explorations doc and §9/§12 above).
+  real yet — see vision §9/§11 for what a real backend needs to cover. This is the next phase.
+- **No presence.** The prototype's simulated teammate activity was never ported, and the header
+  now shows an honest member count rather than a fabricated "4 online". Other members' claims are
+  static seed data, and the auto-release sweep only touches your own claims.
+- **Claims are attributed to the literal string "you".** The onboarding name is persisted but not
+  yet used as the claimant label; that needs real identity, which needs the backend.
 - **Polling, not event-driven.** Both the Simulator tracker and the panel's reposition loop use
   `Timer` polling (~3–7x/sec) rather than `AXObserver` notifications or `NSWorkspace` run/terminate
   notifications. Simpler to implement and fast enough to feel live, but a real AXObserver-based
-  approach would be more efficient and is a reasonable follow-up. (The AX reads themselves now run
-  off the main thread, and the multi-monitor coordinate conversion was fixed in the 2026-07-20
-  hardening pass — see §13.1.)
-- **Onboarding "join workspace" step is cosmetic.** Any code ≥6 characters shows a fake
-  "found acme-mobile" card; there's no real invite-code backend yet (this matches vision §8's
-  phase-1 scope, just noting it's still fully mocked).
+  approach would be more efficient and is a reasonable follow-up. (The AX reads themselves run
+  off the main thread, the multi-monitor coordinate conversion was fixed in the 2026-07-20
+  hardening pass, and the tracker's property writes are now equality-guarded so the poll can't
+  re-render observing views at poll rate.)
+- **Onboarding "join workspace" step is cosmetic.** Any code ≥6 characters shows a "found
+  acme-mobile" card; there's no real invite-code backend yet (this matches vision §8's phase-1
+  scope, just noting it's still fully mocked). The card's counts are at least read from the
+  workspace that actually loads, rather than hardcoded.
+- **The deeplink password is visible in the process list while `simctl` runs.** `simctl` takes the
+  URL as argv and there is no argv-free alternative, so this is an accepted, documented tradeoff
+  for shared test credentials on a local dev tool rather than an oversight. Everything under the
+  app's own control — its log lines, and `simctl`'s echoed stderr — is redacted.
+- **`secondaryText` still special-cases two group ids** (`promos`, `products`) for row subtitles,
+  guarded on the fields existing. Known debt.
+- **`NotchboardViewModel` is still a god object** (~850 lines). Decompose it before backend work;
+  the test target now makes that safe to do.
 
 ### 13.3 A hard-won gotcha worth remembering
 
@@ -347,3 +403,90 @@ sandboxed. We disabled App Sandbox in the project settings (`ENABLE_APP_SANDBOX 
 this — if this project is ever submitted to the Mac App Store, this is a hard constraint to
 revisit (direct/notarized distribution outside the App Store is the more likely path, same as
 most Accessibility-API-driven macOS utilities).
+
+
+### 13.4 The panel's animation budget (measured)
+
+Continuous animation inside the docked panel is far more expensive than it looks, and the reason
+is structural rather than a badly written animation. The panel is a *transparent*, borderless
+window (`isOpaque = false`, `backgroundColor = .clear`, plus a 70pt SwiftUI drop shadow), so every
+animation frame makes the window server re-blend the whole 404×592 panel — shadow included —
+against whatever is behind it.
+
+One continuously pulsing 6pt claim dot therefore cost, in a Release build with the panel open:
+
+| what was animating | CPU (one core, steady state) |
+| --- | --- |
+| pulse animating a shadow *radius* | ~30% |
+| pulse animating opacity only | ~20% |
+| pulse animating opacity, panel shadow removed | ~8.5% |
+| nothing animating | ~0.1% |
+
+So the shadow amplifies the cost roughly 2.5×, but even an opacity-only animation is expensive,
+and it ran for as long as the panel was open. The dot now pulses on hover and holds a steady glow
+otherwise — hover is when "this claim is live" actually needs saying, and it is the moment the
+user is looking at it. Idle cost is back to ~0.1%.
+
+The rule this leaves behind: no continuous animation in the docked panel at rest, and animate
+opacity rather than shadow radii or blur. `IdleAnimationGuardTests` fails the build if a
+`repeatForever` animation appears without an interaction gate, because this regression is
+invisible in a screenshot and only shows up as a warm laptop.
+
+### 13.5 Global shortcuts: why Carbon, and why the chord is scoped
+
+Reaching the catalogue from inside Xcode needs a shortcut that works while another app is
+frontmost, and macOS offers two mechanisms with very different semantics. The API signatures
+say it outright:
+
+```swift
+NSEvent.addLocalMonitorForEvents(matching:handler:)   // handler returns NSEvent?  → can swallow
+NSEvent.addGlobalMonitorForEvents(matching:handler:)  // handler returns Void      → cannot
+```
+
+AppKit's own header is explicit that a global monitor "can only observe the event; you cannot
+modify or otherwise prevent the event from being delivered to its original target application."
+That is deliberate: a background app silently eating another app's keystrokes is a keylogger.
+
+The first build used a global monitor for plain ⌘K/⌘N, which is why every ⌘N in Xcode opened a
+new file *and* expanded Notchboard's add form. No handler-side logic can undo that, because the
+double delivery happens before the handler runs.
+
+So the shortcut now goes through Carbon's `RegisterEventHotKey`, which registers the chord with
+the window server and genuinely consumes it. This is not an exotic choice. A survey of the
+comparable open-source utilities found it universal:
+
+| App | Mechanism |
+| --- | --- |
+| soffes/HotKey, sindresorhus/KeyboardShortcuts | `RegisterEventHotKey` (these are the two libraries most menu-bar apps depend on) |
+| Maccy, Amethyst, MeetingBar | via KeyboardShortcuts |
+| Ice | hand-rolled Carbon registry, no dependency |
+| Rectangle | via MASShortcut |
+| alt-tab-macos | `RegisterEventHotKey` for chords, plus a listen-only event tap for its bare-⌥ hold |
+
+It also needs no TCC permission, unlike a `CGEventTap` (Accessibility) or an `NSEvent` global
+key monitor (also Accessibility).
+
+**The part that needed care.** A consumed chord is owned: while registered, nothing else on the
+machine receives it. And the default chord here is a plain single modifier, ⌃K/⌃N, which the same
+survey showed no comparable app dares ship as a default (Maccy, Clipy and Rectangle all use two
+or three modifiers; Ice and MeetingBar ship no default at all). Worse, ⌃K and ⌃N are not obscure:
+`/System/Library/Frameworks/AppKit.framework/Resources/StandardKeyBinding.dict` maps `^k` to
+`deleteToEndOfParagraph:` and `^n` to `moveDown:` in every AppKit text field, and both zsh and
+bash bind them to `kill-line` and `down-line-or-history`. Taking those machine-wide would be a
+worse bug than the one being fixed.
+
+The resolution is scoping rather than a safer chord. The registration is held only while:
+
+1. the panel can actually respond (onboarding done, Simulator visible or the undocked fallback up), and
+2. Xcode, Simulator, or Notchboard itself is the frontmost application.
+
+Switch to Terminal and, on the next 0.15s tick, ⌃K is `kill-line` again. Rectangle uses the same
+idea in reverse, unregistering its hotkeys while a user-chosen app is frontmost. The modifier is
+also a setting (⌃ / ⌘ / ⌥⌘) with the cost of each spelled out in Settings, since which chord a
+given developer can spare is not something the app can know.
+
+One correction worth recording, because the first version of this code asserted the opposite:
+registration failure does **not** mean another app holds the chord. With `inOptions: 0`,
+`CarbonEvents.h` documents that several applications may register the same hot key and all be
+notified. Failure means a duplicate registration inside this process, or a clash with a
+`kEventHotKeyExclusive` holder.
