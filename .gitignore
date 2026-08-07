@@ -18,3 +18,4 @@ DerivedData/
 
 # Claude Code local settings
 .claude/settings.local.json
+*.profraw

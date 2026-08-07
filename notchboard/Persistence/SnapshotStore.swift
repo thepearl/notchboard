@@ -21,6 +21,8 @@ import os
 
 /// What a snapshot file holds once decrypted.
 struct SnapshotPayload: Codable {
+    /// Stays 1 pre-release like every other stamp (vision.md §14.5): an old-shaped
+    /// snapshot fails decode and refuses as unreadable — no version ledger needed.
     static let currentVersion = 1
     var formatVersion: Int
     var savedAt: Date

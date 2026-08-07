@@ -78,6 +78,22 @@ struct SettingsView: View {
             }
 
             Section {
+                if let room = viewModel.activeCollection.room {
+                    LabeledContent("Room", value: "\(room.room) @ \(room.brokerHost ?? room.brokerURL)")
+                    LabeledContent("Status", value: roomStatusText)
+                    Button("Leave Room…") { viewModel.leaveRoomFromMenu() }
+                } else {
+                    Text("This collection is local — no team room. Set one up from the collection's ▾ menu in the panel.")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Team room — “\(viewModel.workspace.name)”")
+            } footer: {
+                Text("Everything published to the room is encrypted under the room password; the broker relays bytes it can't read. Honest limitation: removing someone means rotating the room password and sharing the new one — there is no server to revoke them from, and rotation can't take back what they already have.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Button("Replay Onboarding…", action: onReplayOnboarding)
             } footer: {
                 Text("Notchboard docks to the real iOS Simulator window via the macOS Accessibility API. It hides automatically when Simulator quits, is closed, or is minimized/hidden, and redocks the moment it's visible again.")
@@ -85,7 +101,18 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 320)
+        .frame(width: 420, height: 430)
+    }
+
+    private var roomStatusText: String {
+        switch viewModel.activeRoomState {
+        case .connected:
+            let others = viewModel.activeRoomSession?.onlineMemberIDs.count ?? 0
+            return "connected · \(others + 1) online"
+        case .connecting: return "connecting…"
+        case .failed(let message): return message
+        default: return "not connected"
+        }
     }
 }
 

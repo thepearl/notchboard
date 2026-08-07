@@ -55,6 +55,102 @@ final class NotchboardViewModel {
     /// The onboarding display name. Labels this user's claims; empty falls back to "you".
     var selfName: String = ""
 
+    // MARK: Sync (vision.md §14.2)
+    /// The room coordinator, when the app runs for real. Weak: AppDelegate owns it, and
+    /// nil (every test, and any run before wiring) simply means no rooms. All room copy
+    /// lives HERE, not in the engine — including the "in use", never "claim" rule.
+    @ObservationIgnored weak var syncEngine: SyncEngine?
+
+    /// The active collection's room session, for the header dot and presence count.
+    var activeRoomSession: RoomSession? {
+        syncEngine?.session(for: activeCollectionID)
+    }
+
+    /// What the connection dot shows: nil = no room configured (amber, as always);
+    /// a configured room with no session yet reads as disconnected rather than "no room".
+    var activeRoomState: SyncConnectionState? {
+        guard activeCollection.room != nil else { return nil }
+        return activeRoomSession?.state ?? .disconnected
+    }
+
+    /// " · offline" when a mark's holder isn't in the room right now — appended to the
+    /// status line, the use button, and the row tooltip so all three tell the same story.
+    func presenceSuffix(for claim: NBClaim) -> String {
+        guard !isMine(claim), let session = activeRoomSession, session.state == .connected else { return "" }
+        return session.isEffectivelyFree(claim) ? " · offline" : ""
+    }
+
+    /// Sets up (or re-points) the active collection's room from the ▾ menu.
+    func setUpRoomFromMenu() {
+        guard let engine = syncEngine else {
+            toast("rooms aren't available in this build", color: .red)
+            return
+        }
+        guard let (config, password) = RoomDialogs.promptForRoomSetup(
+            collectionName: workspace.name, current: activeCollection.room
+        ) else { return }
+        guard RoomKeyStore.saveRoomPassword(password, for: config) else {
+            // The SecretsStore rule: a failed Keychain write is NOT stored — joining
+            // anyway would work until the next relaunch, then silently stop.
+            toast("couldn't store the room password in the Keychain — not joining", color: .red)
+            return
+        }
+        engine.joinRoom(config, password: password, collectionID: activeCollectionID)
+        toast("joining “\(config.room)”…", color: .amber)
+    }
+
+    func leaveRoomFromMenu() {
+        guard let room = activeCollection.room else { return }
+        guard RoomDialogs.confirmLeave(roomName: room.room, collectionName: workspace.name) else { return }
+        syncEngine?.leaveRoom(collectionID: activeCollectionID)
+        RoomKeyStore.deletePasswords(for: room)
+        store.setRoomConfig(nil, collectionID: activeCollectionID)
+        toast("left “\(room.room)” — “\(workspace.name)” is local again", color: .amber)
+    }
+
+    /// §14.3's join moment: an imported file carried a room address. "Not now" keeps the
+    /// address on the collection so the ▾ menu can join later.
+    func offerToJoinImportedRoom(_ room: NBRoomConfig, collectionID: String) {
+        var incoming = room
+        incoming.firstSyncCompleted = false // an importer has never merged, whatever the file says
+        store.setRoomConfig(incoming, collectionID: collectionID)
+        guard let engine = syncEngine else { return }
+        guard let password = RoomDialogs.promptToJoinImportedRoom(room: incoming, memberName: selfClaimLabel) else {
+            toast("staying local — join “\(incoming.room)” any time from the ▾ menu", color: .amber)
+            return
+        }
+        guard RoomKeyStore.saveRoomPassword(password, for: incoming) else {
+            toast("couldn't store the room password in the Keychain — not joining", color: .red)
+            return
+        }
+        engine.joinRoom(incoming, password: password, collectionID: collectionID)
+    }
+
+    /// Whether an element is *actually* blocked: a mark held by someone offline renders
+    /// free (§14.2's live twin of releaseOrphanedClaims) — strictly a rendering rule, the
+    /// mark itself survives their reconnect.
+    func isEffectivelyFree(_ element: NBElement) -> Bool {
+        guard let claim = element.claimedBy else { return true }
+        guard !isMine(claim) else { return false }
+        return syncEngine?.session(for: activeCollectionID)?.isEffectivelyFree(claim) ?? false
+    }
+
+    func handleRoomEvent(collectionID: String, event: RoomEvent) {
+        let name = collections.first { $0.id == collectionID }?.name ?? "collection"
+        switch event {
+        case .connected(let onlineCount):
+            toast("“\(name)” room connected · \(onlineCount) online", color: .green)
+        case .wrongPassword:
+            toast("wrong room password for “\(name)” — rejoin from the collection menu", color: .red)
+        case .failed(let message):
+            toast("“\(name)”: \(message) — changes staying local until it's back", color: .red)
+        case .adoptedRoomState(let elementCount):
+            toast("joined “\(name)” · \(elementCount) elements from the room (local copy snapshotted)", color: .green)
+        case .elementFreed(let element):
+            handleElementFreed(element)
+        }
+    }
+
     // MARK: Navigation / filters
     var activeGroupID: String = "users"
     var currentView: NotchboardPanelView = .list
@@ -99,6 +195,9 @@ final class NotchboardViewModel {
     @ObservationIgnored private var autoReleaseTimer: Timer?
 
     init() {
+        // The store stamps content edits with the editor's identity (NBElement.updatedBy);
+        // it needs to know who that is from the first mutation, not from the first restore.
+        store.selfMemberID = selfMemberID
         autoReleaseTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.releaseExpiredClaims()
         }
@@ -165,6 +264,7 @@ final class NotchboardViewModel {
     func restore(from persisted: PersistedAppState) {
         selfMemberID = persisted.memberID
         selfName = persisted.onboardingName
+        store.selfMemberID = persisted.memberID
 
         let orphaned = store.adoptPersisted(
             persisted.collections,
@@ -402,20 +502,30 @@ final class NotchboardViewModel {
     // MARK: - Actions: element mutation
 
     func toggleFavorite(_ elementID: String) {
-        store.mutate(elementID, in: activeGroupID) { $0.isFavorite.toggle() }
+        // Local-only on purpose: a favourite is personal, it never travels, and it must
+        // never bump the content timestamp (or starring a row would beat a teammate's
+        // real edit in conflict resolution).
+        store.mutateLocalOnly(elementID, in: activeGroupID) { $0.isFavorite.toggle() }
     }
 
     func claimOrRelease(_ elementID: String) {
-        guard var group = workspace.groups[activeGroupID],
-              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
-        let element = group.elements[idx]
+        guard let element = workspace.groups[activeGroupID]?
+            .elements.first(where: { $0.id == elementID }) else { return }
 
         if let claim = element.claimedBy {
             if isMine(claim) {
-                group.elements[idx].claimedBy = nil
-                workspace.groups[activeGroupID] = group
-                didFreeElement(group.elements[idx])
+                store.setClaim(nil, elementID: elementID, group: activeGroupID, collection: activeCollectionID)
+                handleElementFreed(element)
                 toast("released “\(element.name)”", color: .green)
+            } else if isEffectivelyFree(element) {
+                // The holder is offline, so the row renders free (§14.2) — using it is a
+                // legitimate, user-initiated takeover, not a presence-flicker mutation.
+                store.setClaim(NBClaim(who: selfMemberID), elementID: elementID,
+                               group: activeGroupID, collection: activeCollectionID,
+                               claimantName: selfClaimLabel)
+                store.mutate(elementID, in: activeGroupID) { $0.lastUsed = "just now, by \(selfClaimLabel)" }
+                toast("took “\(element.name)” — \(memberName(claim.who)) is offline", color: .amber)
+                copyPrimaryField(of: element)
             } else {
                 // Deliberately does not release it — taking someone's element out from
                 // under them shouldn't be a single misclick. `takeOver` is the explicit
@@ -423,9 +533,12 @@ final class NotchboardViewModel {
                 toast("\(memberName(claim.who)) marked this in use — take it over from the detail view", color: .amber)
             }
         } else {
-            group.elements[idx].claimedBy = NBClaim(who: selfMemberID)
-            group.elements[idx].lastUsed = "just now, by \(selfClaimLabel)"
-            workspace.groups[activeGroupID] = group
+            store.setClaim(NBClaim(who: selfMemberID), elementID: elementID,
+                           group: activeGroupID, collection: activeCollectionID,
+                           claimantName: selfClaimLabel)
+            // The mark and the visible trace are two different changes on the wire: the
+            // claim has its own topic and timestamp, lastUsed is content and bumps.
+            store.mutate(elementID, in: activeGroupID) { $0.lastUsed = "just now, by \(selfClaimLabel)" }
             copyPrimaryField(of: element)
         }
     }
@@ -439,10 +552,10 @@ final class NotchboardViewModel {
     func takeOver(_ elementID: String) {
         guard let element = selectedElement(id: elementID), let claim = element.claimedBy, !isMine(claim) else { return }
         let previous = memberName(claim.who)
-        store.mutate(elementID, in: activeGroupID) {
-            $0.claimedBy = NBClaim(who: selfMemberID)
-            $0.lastUsed = "just now, by \(selfClaimLabel)"
-        }
+        store.setClaim(NBClaim(who: selfMemberID), elementID: elementID,
+                       group: activeGroupID, collection: activeCollectionID,
+                       claimantName: selfClaimLabel)
+        store.mutate(elementID, in: activeGroupID) { $0.lastUsed = "just now, by \(selfClaimLabel)" }
         toast("took “\(element.name)” from \(previous)", color: .amber)
     }
 
@@ -464,9 +577,10 @@ final class NotchboardViewModel {
         toast("you'll be pinged when “\(element.name)” is free", color: .green)
     }
 
-    /// Called whenever an element's mark is cleared (manual release or auto-release). If it
-    /// was being watched, fire a local notification and drop the watch.
-    private func didFreeElement(_ element: NBElement) {
+    /// Called whenever an element's mark is cleared — manual release, auto-release, a
+    /// remote release, or the holder going offline. If it was being watched, fire a local
+    /// notification and drop the watch. Internal because room events route through it.
+    func handleElementFreed(_ element: NBElement) {
         guard watchedElementIDs.remove(element.id) != nil else { return }
         Notifier.notifyElementFree(name: element.name)
         toast("“\(element.name)” is now free", color: .green)
@@ -584,8 +698,10 @@ final class NotchboardViewModel {
             // Logging in as this account is de facto using it — auto-mark if it was free
             // (vision §5.3), but only now that the deeplink actually succeeded.
             if wasFree, self.store.element(element.id, group: owningGroupID, collection: owningCollectionID)?.claimedBy == nil {
+                self.store.setClaim(NBClaim(who: self.selfMemberID), elementID: element.id,
+                                    group: owningGroupID, collection: owningCollectionID,
+                                    claimantName: self.selfClaimLabel)
                 self.store.mutate(element.id, group: owningGroupID, collection: owningCollectionID) {
-                    $0.claimedBy = NBClaim(who: self.selfMemberID)
                     $0.lastUsed = "just now, by \(self.selfClaimLabel)"
                 }
             }
@@ -607,10 +723,10 @@ final class NotchboardViewModel {
 
         switch selectedElement(id: element.id)?.claimedBy {
         case nil:
-            store.mutate(element.id, in: activeGroupID) {
-                $0.claimedBy = NBClaim(who: selfMemberID)
-                $0.lastUsed = "just now, by \(selfClaimLabel)"
-            }
+            store.setClaim(NBClaim(who: selfMemberID), elementID: element.id,
+                           group: activeGroupID, collection: activeCollectionID,
+                           claimantName: selfClaimLabel)
+            store.mutate(element.id, in: activeGroupID) { $0.lastUsed = "just now, by \(selfClaimLabel)" }
             toast("marked “\(element.name)” in use", color: .green)
         case .some(let claim) where isMine(claim):
             break // already yours; the copy toast is enough
@@ -624,24 +740,22 @@ final class NotchboardViewModel {
     func releaseExpiredClaims() {
         let limit = autoReleaseMinutes
         // Sweeps every collection, not just the visible one — your idle mark in a
-        // background collection ages exactly the same way.
-        for cIndex in collections.indices {
-            for groupID in collections[cIndex].workspace.groupOrder {
-                guard var group = collections[cIndex].workspace.groups[groupID] else { continue }
-                var changed = false
-                for idx in group.elements.indices {
+        // background collection ages exactly the same way. Iterates a value copy while
+        // releasing through the store, so the walk can't trip over its own mutations.
+        for collection in collections {
+            for groupID in collection.workspace.groupOrder {
+                guard let group = collection.workspace.groups[groupID] else { continue }
+                for element in group.elements {
                     // Only auto-release your own idle marks — the manual path already
                     // refuses to release someone else's, and other members' ages are
-                    // frozen in this local build, so sweeping them would be meaningless
-                    // churn.
-                    guard let claim = group.elements[idx].claimedBy,
+                    // frozen until their Mac speaks, so sweeping them would be
+                    // meaningless churn.
+                    guard let claim = element.claimedBy,
                           isMine(claim), claim.minutesAgo >= limit else { continue }
-                    group.elements[idx].claimedBy = nil
-                    changed = true
-                    didFreeElement(group.elements[idx])
-                    toast("auto-released “\(group.elements[idx].name)” after \(limit)m idle", color: .green)
+                    store.setClaim(nil, elementID: element.id, group: groupID, collection: collection.id)
+                    handleElementFreed(element)
+                    toast("auto-released “\(element.name)” after \(limit)m idle", color: .green)
                 }
-                if changed { collections[cIndex].workspace.groups[groupID] = group }
             }
         }
     }
@@ -801,7 +915,7 @@ final class NotchboardViewModel {
             toast("a collection needs a name", color: .red)
             return
         }
-        workspace.name = trimmed
+        store.renameActive(to: trimmed)
         toast("renamed to “\(trimmed)”", color: .green)
     }
 
@@ -812,9 +926,17 @@ final class NotchboardViewModel {
     }
 
     func deleteActiveCollection() {
+        let doomedID = activeCollectionID
         guard let deleted = store.deleteActive() else {
             toast("this is the only collection — create another before deleting it", color: .red)
             return
+        }
+        // Deleting a room-joined collection also leaves the room: a session for a
+        // catalogue that no longer exists would keep publishing nothing and holding a
+        // password this Mac has no use for.
+        if let room = deleted.room {
+            syncEngine?.leaveRoom(collectionID: doomedID)
+            RoomKeyStore.deletePasswords(for: room)
         }
         settleAfterCatalogueChange()
         toast("collection “\(deleted.name)” deleted", color: .red)

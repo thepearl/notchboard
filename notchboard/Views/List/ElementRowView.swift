@@ -43,7 +43,7 @@ struct ElementRowView: View {
 
             if let claim = element.claimedBy {
                 ClaimBadge(
-                    who: viewModel.memberName(claim.who),
+                    who: viewModel.memberName(claim.who) + viewModel.presenceSuffix(for: claim),
                     ageLabel: claim.ageLabel,
                     envLabel: element.sortedEnvironments.map { $0.rawValue.lowercased() }.joined(separator: "/"),
                     // Only the user's own claims are swept by auto-release; teammates'

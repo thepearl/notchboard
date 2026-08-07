@@ -39,6 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let tracker = SimulatorWindowTracker()
     private var viewModel: NotchboardViewModel!
     private var onboarding: OnboardingViewModel!
+    /// The room coordinator (vision.md §14.2). Created here — never in a view model's
+    /// init — so no test ever opens a socket, the same rule the tracker follows.
+    private var syncEngine: SyncEngine?
 
     private var repositionTimer: Timer?
     private var lastContentMode: PanelContentMode?
@@ -101,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SecretsStore.pruneOrphans(keeping: Set(viewModel.collections.allSecretKeychainKeys))
         }
 
+        setUpSyncEngine(for: viewModel)
         setUpPanel()
         setUpStatusItem()
         installGlobalShortcuts()
@@ -137,6 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         repositionTimer?.invalidate()
         tracker.stop()
+        // Say goodbye to every room properly (retained offline presence) so teammates see
+        // the claims render free now rather than after the broker's will timeout.
+        syncEngine?.sleepAll()
 
         // Saves are normally debounced (see NotchboardSceneView.persist); flush a final
         // immediate write so the last half-second of changes isn't lost on quit.
@@ -147,6 +154,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Setup
+
+    /// Wires the sync seam end to end: local store mutations → engine → room, and room
+    /// events → view model copy. Rooms whose password is in the Keychain reconnect here
+    /// at launch (the password prompt is a join-time affordance, not a launch-time one).
+    private func setUpSyncEngine(for viewModel: NotchboardViewModel) {
+        let memberID = viewModel.selfMemberID
+        let engine = SyncEngine(
+            store: viewModel.store,
+            selfMemberID: memberID,
+            selfName: viewModel.selfName,
+            transportFactory: { config in
+                MQTTSyncTransport(config: config, memberID: memberID)
+            }
+        )
+        // Weak on purpose: store → sink → engine → sessions → store would otherwise cycle.
+        viewModel.store.changeSink = { [weak engine] change in
+            engine?.handleLocalChange(change)
+        }
+        engine.onEvent = { [weak viewModel] collectionID, event in
+            viewModel?.handleRoomEvent(collectionID: collectionID, event: event)
+        }
+        viewModel.syncEngine = engine
+        syncEngine = engine
+
+        // Rejoin every room this Mac already knows the password for.
+        for collection in viewModel.collections {
+            guard let room = collection.room,
+                  let password = RoomKeyStore.roomPassword(for: room) else { continue }
+            engine.joinRoom(room, password: password, collectionID: collection.id)
+        }
+
+        // The lid: presence must flip promptly and reconnect must re-replay, and neither
+        // can rely on the TCP session noticing. Workspace notifications are the signal.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncEngine?.sleepAll() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncEngine?.wakeAll() }
+        }
+    }
 
     private static func makeViewModels() -> (NotchboardViewModel, OnboardingViewModel) {
         let viewModel = NotchboardViewModel()
@@ -258,7 +309,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (deliberately slow) PBKDF2 work.
         guard let password = WorkspaceExportFlow.promptForPassword(collectionName: viewModel.workspace.name) else { return }
         do {
-            let data = try WorkspaceTransfer.exportData(viewModel.workspace, password: password)
+            // The room address travels with the file (§14.3: the file is the invitation);
+            // exportData strips the local-only firstSyncCompleted flag itself.
+            let data = try WorkspaceTransfer.exportData(
+                viewModel.workspace, password: password, room: viewModel.activeCollection.room
+            )
             try data.write(to: url, options: .atomic)
             viewModel.toast("exported “\(viewModel.workspace.name)” — secrets encrypted", color: .green)
         } catch {
@@ -283,8 +338,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func importCollections(from urls: [URL]) {
         for url in urls {
             do {
-                guard let workspace = try WorkspaceImportFlow.importInteractively(from: url) else { continue }
-                viewModel.addCollection(workspace)
+                guard let imported = try WorkspaceImportFlow.importInteractively(from: url) else { continue }
+                viewModel.addCollection(imported.workspace)
+                // §14.3's join moment: the file carried its room address, so the new
+                // collection (now active — add() switches to it) offers to go live.
+                if let room = imported.room {
+                    viewModel.offerToJoinImportedRoom(room, collectionID: viewModel.activeCollectionID)
+                }
             } catch {
                 viewModel.toast(WorkspaceImportFlow.userMessage(for: error), color: .red)
             }

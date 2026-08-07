@@ -20,10 +20,11 @@ import os
 
 struct PersistedAppState: Codable, Equatable {
     /// A plain stamp written for the future: real version history begins at the first
-    /// public release. Until then there is deliberately NO compatibility code here — the
-    /// app is unpublished with one user, so a schema change resets through the
-    /// corrupt-backup path in `load()` instead of accumulating migration shims
-    /// (decision 2026-08-07, vision.md §14.5).
+    /// public release. Until then there is deliberately NO compatibility code here — and
+    /// no version history either: the stamp stays 1 through every pre-release shape
+    /// change, because an old-shaped file already resets through the corrupt-backup path
+    /// in `load()` when its decode fails (decision 2026-08-07, vision.md §14.5). Bumping
+    /// it would just accumulate the v1/v2 ledger the rule exists to prevent.
     static let currentSchemaVersion = 1
 
     var schemaVersion: Int

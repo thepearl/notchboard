@@ -24,7 +24,9 @@ struct DetailView: View {
 
     private var claimLine: (text: String, color: Color) {
         if let claim = element.claimedBy {
-            return ("● in use by \(viewModel.memberName(claim.who).lowercased()) · \(claim.ageLabel)", NBColor.green)
+            let suffix = viewModel.presenceSuffix(for: claim)
+            return ("● in use by \(viewModel.memberName(claim.who).lowercased()) · \(claim.ageLabel)\(suffix)",
+                    suffix.isEmpty ? NBColor.green : NBColor.textSecondary)
         }
         return ("○ free", NBColor.textSecondary)
     }
@@ -123,7 +125,11 @@ struct DetailView: View {
 
     private var claimButtonLabel: String {
         guard let claim = element.claimedBy else { return "use + copy" }
-        return viewModel.isMine(claim) ? "release" : "in use by \(viewModel.memberName(claim.who))"
+        if viewModel.isMine(claim) { return "release" }
+        // An offline holder's mark renders free: the button says so and claiming takes over.
+        return viewModel.isEffectivelyFree(element)
+            ? "use + copy (\(viewModel.memberName(claim.who)) offline)"
+            : "in use by \(viewModel.memberName(claim.who))"
     }
 
     private var claimButtonStyle: (bg: Color, fg: Color, border: Color) {

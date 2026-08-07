@@ -11,6 +11,9 @@ import SwiftUI
 struct CollapsedNotchView: View {
     let claimedCount: Int
     var edge: NBDockEdge = .right
+    /// The room connection colour (NBColor.syncState) — one token with the header's dot
+    /// so the two surfaces can't disagree. Amber when there is no room, exactly as before.
+    var syncColor: Color = NBColor.amber
     let onTap: () -> Void
 
     @State private var isHovering = false
@@ -27,7 +30,7 @@ struct CollapsedNotchView: View {
     var body: some View {
         VStack(spacing: 7) {
             Rectangle()
-                .fill(NBColor.amber)
+                .fill(syncColor)
                 .frame(width: 9, height: 9)
 
             Text("●\(claimedCount)")

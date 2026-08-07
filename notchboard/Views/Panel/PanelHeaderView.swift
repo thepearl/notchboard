@@ -13,9 +13,12 @@ struct PanelHeaderView: View {
 
     var body: some View {
         HStack(spacing: 9) {
+            // The brand square doubles as the room connection dot (NBColor.syncState):
+            // amber = local/connecting as it always was, green = room live, red = failed.
             Rectangle()
-                .fill(NBColor.amber)
+                .fill(NBColor.syncState(viewModel.activeRoomState))
                 .frame(width: 8, height: 8)
+                .help(connectionHelp)
 
             Text("notchboard")
                 .font(NBFont.ui(13, weight: .bold))
@@ -23,6 +26,13 @@ struct PanelHeaderView: View {
                 .tracking(-0.2)
 
             collectionSwitcher
+
+            if let session = viewModel.activeRoomSession, session.state == .connected {
+                Text("· \(session.onlineMemberIDs.count + 1) online")
+                    .font(NBFont.mono(9.5))
+                    .foregroundStyle(NBColor.green)
+                    .help("people in this collection's room right now, including you")
+            }
 
             Spacer()
 
@@ -106,6 +116,16 @@ struct PanelHeaderView: View {
                     viewModel.setDeeplinkScheme(scheme)
                 }
             }
+            // The team room lives beside the deeplink scheme: both are per-collection
+            // wiring, discovered at the moment someone needs them (vision.md §14.3).
+            Button(roomMenuTitle) {
+                viewModel.setUpRoomFromMenu()
+            }
+            if viewModel.activeCollection.room != nil {
+                Button("leave room…") {
+                    viewModel.leaveRoomFromMenu()
+                }
+            }
             Divider()
             Button("delete…") {
                 if CollectionDialogs.confirmDelete(
@@ -126,6 +146,26 @@ struct PanelHeaderView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("switch or manage collections")
+    }
+
+    private var roomMenuTitle: String {
+        guard let room = viewModel.activeCollection.room else { return "set up team room…" }
+        switch viewModel.activeRoomState {
+        case .connected: return "room: \(room.room) · connected"
+        case .connecting: return "room: \(room.room) · connecting…"
+        case .failed: return "room: \(room.room) · unreachable — fix…"
+        default: return "room: \(room.room) · join…"
+        }
+    }
+
+    private var connectionHelp: String {
+        guard let room = viewModel.activeCollection.room else { return "local collection — no team room" }
+        switch viewModel.activeRoomState {
+        case .connected: return "room “\(room.room)” connected"
+        case .connecting: return "connecting to “\(room.room)”…"
+        case .failed(let message): return "room “\(room.room)”: \(message)"
+        default: return "room “\(room.room)” — not connected"
+        }
     }
 }
 

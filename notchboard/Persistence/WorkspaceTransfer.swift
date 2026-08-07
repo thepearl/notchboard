@@ -21,18 +21,26 @@
 import Foundation
 
 struct WorkspaceTransferFile: Codable {
-    /// A stamp for the future — version history starts at the first public release.
+    /// A stamp for the future — version history starts at the first public release, so
+    /// this stays 1 through every pre-release shape change: an old-shaped file fails
+    /// decode and reads as unreadable, which is the same refusal with no v1/v2 ledger
+    /// (vision.md §14.5).
     static let currentVersion = 1
     var formatVersion: Int
     var workspace: NBWorkspace
     /// Present whenever the source had secret values; nil in exports of catalogues that
     /// hold none.
     var secrets: SecretsEnvelope?
+    /// The team room this collection syncs through, when it has one. The address is the
+    /// invitation (§14.3: import → "join as <name>?"); the room password never travels in
+    /// a file — it is shared out of band, like a wifi password.
+    var room: NBRoomConfig?
 
-    init(workspace: NBWorkspace, secrets: SecretsEnvelope? = nil) {
+    init(workspace: NBWorkspace, secrets: SecretsEnvelope? = nil, room: NBRoomConfig? = nil) {
         self.formatVersion = Self.currentVersion
         self.workspace = workspace
         self.secrets = secrets
+        self.room = room
     }
 }
 
@@ -47,13 +55,18 @@ enum WorkspaceTransfer {
     /// Encodes the workspace for sharing, sealing every secret value under `password`.
     /// `rounds` exists for tests — the deliberate slowness of the real KDF cost would
     /// otherwise dominate the suite.
-    static func exportData(_ workspace: NBWorkspace, password: String, rounds: Int = TransferCrypto.defaultRounds) throws -> Data {
+    static func exportData(_ workspace: NBWorkspace, password: String, room: NBRoomConfig? = nil, rounds: Int = TransferCrypto.defaultRounds) throws -> Data {
         var secretValues: [String: String] = [:]
         let stripped = workspace.clearingClaims().mappingSecretValues { elementID, fieldKey, value in
             if !value.isEmpty { secretValues["\(elementID).\(fieldKey)"] = value }
             return ""
         }
-        var file = WorkspaceTransferFile(workspace: stripped)
+        // The room address travels, its firstSyncCompleted flag doesn't — that flag
+        // describes *this Mac's* relationship with the room, and an importer must start
+        // from "never merged" so their first connect adopts the room's state.
+        var shareableRoom = room
+        shareableRoom?.firstSyncCompleted = false
+        var file = WorkspaceTransferFile(workspace: stripped, room: shareableRoom)
         if !secretValues.isEmpty {
             file.secrets = try TransferCrypto.seal(secretValues, password: password, rounds: rounds)
         }

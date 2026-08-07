@@ -211,6 +211,14 @@ struct NBElement: Identifiable, Codable, Equatable {
     var note: String
     var lastUsed: String
     var values: [String: String]
+    /// When this element's *content* last changed — the last-write-wins timestamp for sync
+    /// (vision.md §14.2). Two deliberate exclusions: `isFavorite` is personal and never
+    /// travels, and `claimedBy` has its own topic and its own timestamp, so claim writes
+    /// must not bump this (or toggling a mark would fight content conflict resolution).
+    var updatedAt: Date = Date()
+    /// memberID of the last editor. Breaks LWW ties deterministically: equal timestamps →
+    /// the lexically greater `updatedBy` wins, on every peer, with no coordination.
+    var updatedBy: String = ""
 
     var isClaimed: Bool { claimedBy != nil }
 
@@ -234,6 +242,9 @@ struct NBGroup: Identifiable, Codable, Equatable {
     var secondaryKey: String
     var fields: [NBField]
     var elements: [NBElement]
+    /// When this group's *schema* (name, fields, ordering key) last changed — the LWW
+    /// timestamp for the sync schema topic. Element mutations don't touch it.
+    var updatedAt: Date = Date()
 
     /// The single source of truth for "which of this group's fields hold secrets" — used by
     /// persistence, export, and CRUD cleanup so the rule lives in one place.
@@ -242,16 +253,56 @@ struct NBGroup: Identifiable, Codable, Equatable {
     }
 }
 
+extension Date {
+    /// LWW timestamps travel as milliseconds (SyncPayloads), so local stamps truncate to
+    /// match. Without this, two peers editing within the same millisecond diverge
+    /// permanently: each one's full-precision local stamp beats the other's truncated
+    /// wire copy, and neither side applies.
+    var truncatedToMilliseconds: Date {
+        Date(timeIntervalSince1970: (timeIntervalSince1970 * 1000).rounded(.down) / 1000)
+    }
+}
+
+/// A record that something was deleted, kept so the deletion itself can travel.
+///
+/// Absence is not a message: a peer that was offline while an element was deleted sees
+/// nothing missing and would happily republish its stale copy, resurrecting the row for
+/// everyone (the retained-message trap — clearing a retained topic delivers nothing to a
+/// Mac that reconnects later). Deletions therefore publish a real payload carrying
+/// `deletedAt`, and the local model keeps its own tombstones so a delete performed offline
+/// survives relaunch and still publishes on reconnect.
+struct NBTombstone: Codable, Equatable {
+    enum Kind: String, Codable {
+        case element, group
+    }
+
+    /// How long a tombstone is kept (and how long its retained twin is asked to live on
+    /// the broker). A peer offline longer than this can resurrect the row — accepted:
+    /// the alternative is tombstones accumulating forever.
+    static let retention: TimeInterval = 30 * 24 * 60 * 60
+
+    var kind: Kind
+    /// The deleted element's or group's id.
+    var id: String
+    /// The owning group for element tombstones; nil for group tombstones.
+    var groupID: String?
+    var deletedAt: Date
+    /// memberID of whoever deleted it.
+    var by: String
+}
+
 struct NBWorkspace: Codable, Equatable {
     var name: String
+    /// When the catalogue was last renamed — the LWW timestamp for the sync meta topic.
+    /// Without it, two Macs that disagree about the name after a restart have nothing to
+    /// compare.
+    var nameUpdatedAt: Date = Date()
     var groupOrder: [String]
     var groups: [String: NBGroup]
     var members: [String: NBMember]
-
-    /// Everyone in the workspace, including the local user (who isn't in `members`).
-    /// Replaces the old hardcoded `onlineCount` — without a backend there is no presence,
-    /// and the header shows an honest member count instead of a fake "online" figure.
-    var memberCount: Int { members.count + 1 }
+    /// Deletions that still need to be visible to peers (see NBTombstone). Pruned past
+    /// `NBTombstone.retention` at load time in `CollectionStore.adoptPersisted`.
+    var tombstones: [NBTombstone] = []
 
     /// Total elements across all groups — drives the onboarding join card and toast.
     var elementCount: Int { groups.values.reduce(0) { $0 + $1.elements.count } }
@@ -323,7 +374,8 @@ struct NBWorkspace: Codable, Equatable {
                     id: UUID().uuidString,
                     name: element.name, environments: element.environments, isFavorite: element.isFavorite,
                     claimedBy: element.claimedBy, note: element.note,
-                    lastUsed: element.lastUsed, values: element.values
+                    lastUsed: element.lastUsed, values: element.values,
+                    updatedAt: element.updatedAt, updatedBy: element.updatedBy
                 )
                 seen.insert(group.elements[index].id)
                 changed = true

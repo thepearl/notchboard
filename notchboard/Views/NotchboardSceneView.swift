@@ -129,7 +129,11 @@ struct NotchboardSceneView: View {
     }
 
     private var notch: some View {
-        CollapsedNotchView(claimedCount: viewModel.claimedCount, edge: viewModel.dockEdge) {
+        CollapsedNotchView(
+            claimedCount: viewModel.claimedCount,
+            edge: viewModel.dockEdge,
+            syncColor: NBColor.syncState(viewModel.activeRoomState)
+        ) {
             viewModel.toggleExpanded()
         }
         .frame(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight, alignment: .top)
@@ -160,7 +164,12 @@ struct NotchboardSceneView: View {
                 // The interactive flow handles the encrypted-secrets prompt (with its
                 // skip path); nil means the user cancelled there.
                 guard let imported = try WorkspaceImportFlow.importInteractively(from: url) else { return false }
-                viewModel.replaceActiveCollection(with: imported)
+                viewModel.replaceActiveCollection(with: imported.workspace)
+                if let room = imported.room {
+                    // Persona 2's onboarding path (§14.3): imported the team's file,
+                    // offered the room right there.
+                    viewModel.offerToJoinImportedRoom(room, collectionID: viewModel.activeCollectionID)
+                }
                 return true
             } catch {
                 viewModel.toast(WorkspaceImportFlow.userMessage(for: error), color: .red)

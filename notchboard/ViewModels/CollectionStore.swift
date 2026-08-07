@@ -29,6 +29,15 @@ final class CollectionStore {
     /// it.
     var activeCollectionID: String
 
+    /// Outbound half of the sync seam: every *local* mutation primitive reports itself
+    /// here (vision.md §14.2). nil — the default, and what every test gets — means the
+    /// changes just don't go anywhere, exactly like `deeplinkOpener`'s closure seam.
+    /// The remote-apply path (CollectionStore+SyncApply) deliberately never calls it.
+    @ObservationIgnored var changeSink: ((SyncChange) -> Void)?
+    /// Who to stamp content mutations with (`NBElement.updatedBy`). Set from the persisted
+    /// identity by the view model; empty in tests that don't care.
+    @ObservationIgnored var selfMemberID: String = ""
+
     init(collections: [NBCollection]? = nil) {
         let seeded = collections?.isEmpty == false
             ? collections!
@@ -82,20 +91,66 @@ final class CollectionStore {
             .flatMap { $0.elements.map(\.id) })
     }
 
-    /// Mutates an element in the active collection's named group.
+    /// Mutates an element's *content* in the active collection's named group.
     func mutate(_ elementID: String, in groupID: String, _ change: (inout NBElement) -> Void) {
         mutate(elementID, group: groupID, collection: activeCollectionID, change)
     }
 
-    /// Fully-addressed mutation. Async completions must use this: an element's owning group
-    /// *and* collection have to be captured at fire time, or a mid-flight switch lands the
-    /// change in whatever happens to be active when the callback runs.
+    /// Fully-addressed content mutation. Async completions must use this: an element's
+    /// owning group *and* collection have to be captured at fire time, or a mid-flight
+    /// switch lands the change in whatever happens to be active when the callback runs.
+    ///
+    /// Content mutations are stamped (`updatedAt`/`updatedBy` — the LWW identity of the
+    /// edit) and emitted to the sink. Two kinds of element write must NOT come through
+    /// here: claims (`setClaim` — their timestamp lives on the claim, and bumping
+    /// `updatedAt` would make marking a row in use fight a teammate's real edit) and
+    /// favourites (`mutateLocalOnly` — personal, never travels).
     func mutate(_ elementID: String, group groupID: String, collection collectionID: String, _ change: (inout NBElement) -> Void) {
         guard let cIndex = collections.firstIndex(where: { $0.id == collectionID }),
               var group = collections[cIndex].workspace.groups[groupID],
               let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
+        let before = group.elements[idx]
         change(&group.elements[idx])
+        // A no-op closure must stay a no-op: Observation notifies on writes, not changes,
+        // and an unchanged element must not be re-stamped into "edited just now".
+        guard group.elements[idx] != before else { return }
+        group.elements[idx].updatedAt = Date().truncatedToMilliseconds
+        group.elements[idx].updatedBy = selfMemberID
         collections[cIndex].workspace.groups[groupID] = group
+        changeSink?(.element(collectionID: collectionID, groupID: groupID, element: group.elements[idx]))
+    }
+
+    /// Mutation for the element state that belongs to *this Mac* only (today: the
+    /// favourite star). No stamp, no emission — a personal toggle must never travel, and
+    /// must never win a content conflict against a teammate's real edit.
+    func mutateLocalOnly(_ elementID: String, in groupID: String, _ change: (inout NBElement) -> Void) {
+        guard var group = workspace.groups[groupID],
+              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
+        change(&group.elements[idx])
+        workspace.groups[groupID] = group
+    }
+
+    /// The one write path for in-use marks. Writes `claimedBy` WITHOUT touching
+    /// `updatedAt` — the claim carries its own timestamp — and emits `.claim` so the room
+    /// hears about it. `claimantName` is the display label to travel with it (member ids
+    /// mean nothing to a Mac that has never met this member).
+    func setClaim(_ claim: NBClaim?, elementID: String, group groupID: String, collection collectionID: String, claimantName: String = "") {
+        guard let cIndex = collections.firstIndex(where: { $0.id == collectionID }),
+              var group = collections[cIndex].workspace.groups[groupID],
+              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
+        guard group.elements[idx].claimedBy != claim else { return }
+        group.elements[idx].claimedBy = claim
+        collections[cIndex].workspace.groups[groupID] = group
+        changeSink?(.claim(collectionID: collectionID, elementID: elementID, claim: claim, claimantName: claimantName))
+    }
+
+    /// Renames the active catalogue, stamping the meta LWW timestamp and telling the room.
+    func renameActive(to name: String) {
+        guard workspace.name != name else { return }
+        let stamp = Date().truncatedToMilliseconds
+        workspace.name = name
+        workspace.nameUpdatedAt = stamp
+        changeSink?(.meta(collectionID: activeCollectionID, name: name, updatedAt: stamp))
     }
 
     func element(_ elementID: String, group groupID: String, collection collectionID: String) -> NBElement? {
@@ -201,11 +256,15 @@ final class CollectionStore {
     func adoptPersisted(_ persisted: [NBCollection], activeID: String, selfMemberID: String) -> Int {
         var restored = persisted
         var orphaned = 0
+        let tombstoneCutoff = Date().addingTimeInterval(-NBTombstone.retention)
         for index in restored.indices {
             restored[index].workspace.reconcileGroupOrder()
             // A claim by someone absent from `members` can never be released through the
             // UI, so it would lock the row and inflate the notch badge permanently.
             orphaned += restored[index].workspace.releaseOrphanedClaims(ownedBy: [selfMemberID])
+            // Tombstones only need to outlive the slowest returning peer; past the
+            // retention window they are dead weight (matching the broker-side expiry).
+            restored[index].workspace.tombstones.removeAll { $0.deletedAt < tombstoneCutoff }
         }
         // A collection with no groups can't hold or accept anything.
         restored.removeAll { $0.workspace.groups.isEmpty }
@@ -225,11 +284,17 @@ final class CollectionStore {
 
     func appendElement(_ element: NBElement, to groupID: String) {
         guard var group = workspace.groups[groupID] else { return }
-        group.elements.append(element)
+        var stamped = element
+        stamped.updatedAt = Date().truncatedToMilliseconds
+        stamped.updatedBy = selfMemberID
+        group.elements.append(stamped)
         workspace.groups[groupID] = group
+        changeSink?(.element(collectionID: activeCollectionID, groupID: groupID, element: stamped))
     }
 
-    /// Removes an element and its secrets, returning it so the caller can report what went.
+    /// Removes an element and its secrets, returning it so the caller can report what
+    /// went. Leaves a tombstone: absence is not a message, and a peer that was offline
+    /// during the delete would otherwise republish its stale copy and resurrect the row.
     @discardableResult
     func deleteElement(_ elementID: String, from groupID: String) -> NBElement? {
         guard var group = workspace.groups[groupID],
@@ -239,14 +304,22 @@ final class CollectionStore {
         for key in group.secretFieldKeys {
             SecretsStore.delete(for: "\(element.id).\(key)")
         }
+        let deletedAt = Date().truncatedToMilliseconds
+        workspace.tombstones.append(
+            NBTombstone(kind: .element, id: elementID, groupID: groupID, deletedAt: deletedAt, by: selfMemberID)
+        )
+        changeSink?(.elementDeleted(collectionID: activeCollectionID, groupID: groupID, elementID: elementID, deletedAt: deletedAt))
         return element
     }
 
     // MARK: - Groups
 
     func addGroup(_ group: NBGroup) {
-        workspace.groups[group.id] = group
-        workspace.groupOrder.append(group.id)
+        var stamped = group
+        stamped.updatedAt = Date().truncatedToMilliseconds
+        workspace.groups[stamped.id] = stamped
+        workspace.groupOrder.append(stamped.id)
+        changeSink?(.schema(collectionID: activeCollectionID, group: stamped, sortIndex: workspace.groupOrder.count - 1))
     }
 
     /// Applies an edited schema to an existing group.
@@ -281,12 +354,16 @@ final class CollectionStore {
         group.singular = GroupFormModel.singularise(name)
         group.fields = fields
         group.secondaryKey = firstField.key
+        group.updatedAt = Date().truncatedToMilliseconds
         workspace.groups[groupID] = group
+        let sortIndex = workspace.groupOrder.firstIndex(of: groupID) ?? 0
+        changeSink?(.schema(collectionID: activeCollectionID, group: group, sortIndex: sortIndex))
         return true
     }
 
     /// Deletes a group, its elements and all their secrets. Returns the group so the caller
-    /// can name it.
+    /// can name it. Leaves a group tombstone (see `deleteElement` for why deletions must
+    /// be a message, not an absence).
     @discardableResult
     func deleteGroup(_ groupID: String) -> NBGroup? {
         guard let group = workspace.groups[groupID] else { return nil }
@@ -297,12 +374,24 @@ final class CollectionStore {
         }
         workspace.groups.removeValue(forKey: groupID)
         workspace.groupOrder.removeAll { $0 == groupID }
+        let deletedAt = Date().truncatedToMilliseconds
+        workspace.tombstones.append(
+            NBTombstone(kind: .group, id: groupID, groupID: nil, deletedAt: deletedAt, by: selfMemberID)
+        )
+        changeSink?(.groupDeleted(
+            collectionID: activeCollectionID,
+            groupID: groupID,
+            elementIDs: group.elements.map(\.id),
+            deletedAt: deletedAt
+        ))
         return group
     }
 
     // MARK: - Secrets
 
-    private func purgeSecrets(of workspace: NBWorkspace) {
+    /// Internal (not private) because the sync-apply extension lives in its own file and
+    /// room adoption must purge exactly as deletion does.
+    func purgeSecrets(of workspace: NBWorkspace) {
         for key in workspace.allSecretKeychainKeys {
             SecretsStore.delete(for: key)
         }

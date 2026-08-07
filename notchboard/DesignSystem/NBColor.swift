@@ -44,6 +44,18 @@ enum NBColor {
     static let green = Color(hex: 0x3ddc84)
     static let red = Color(hex: 0xff6b6b)
 
+    /// The brand square doubles as the room connection dot (header + collapsed notch):
+    /// no room keeps the familiar amber, a live room turns it green, a failure turns it
+    /// red. One mapping for both surfaces so they can't disagree. Static colour only —
+    /// the no-continuous-animation constraint applies to it like everything else.
+    static func syncState(_ state: SyncConnectionState?) -> Color {
+        switch state {
+        case nil, .connecting, .disconnected: return amber
+        case .connected: return green
+        case .failed: return red
+        }
+    }
+
     // MARK: Environment colors
     static let envDev = Color(hex: 0x7ab8ff)
     static let envStg = Color(hex: 0xffb454)

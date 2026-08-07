@@ -16,11 +16,52 @@
 
 import Foundation
 
+/// Where a collection's team room lives (vision.md §14.2/§14.3). The address is shareable
+/// — it travels inside exports so a teammate's import can offer "join as <name>?" — but
+/// the room password never sits here: it lives in the Keychain (RoomKeyStore), shared out
+/// of band like a wifi password.
+struct NBRoomConfig: Codable, Equatable {
+    /// Broker address: "mqtts://host[:8883]" or "wss://host[:443]/path" (the
+    /// corp-firewall fallback). May carry a username ("mqtts://user@host") for brokers
+    /// with shared credentials; the broker password joins the room password in the
+    /// Keychain.
+    var brokerURL: String
+    /// Room slug — one room per collection, so this names the collection on the broker.
+    var room: String
+    /// Gates the first-connect asymmetry: false means this Mac has never merged with the
+    /// room, so a non-empty room replaces the local copy (after a forced snapshot) instead
+    /// of merging — the rule that keeps two teammates who imported the same file from
+    /// double-pushing every row.
+    var firstSyncCompleted: Bool = false
+
+    /// The broker's host, for key derivation (the room salt binds to host + room) and
+    /// Keychain account keys. nil when the URL doesn't parse — callers refuse loudly.
+    var brokerHost: String? {
+        URL(string: brokerURL)?.host()
+    }
+
+    /// Lowercased [a-z0-9-] slug, or nil if nothing valid survives. Same posture as
+    /// NBDeeplinkScheme.resolve: normalise what people actually paste, refuse the rest.
+    static func normalisedSlug(_ raw: String) -> String? {
+        let slug = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+        guard !slug.isEmpty,
+              slug.allSatisfy({ $0.isLowercase && $0.isASCII || $0.isNumber || $0 == "-" }) else {
+            return nil
+        }
+        return slug
+    }
+}
+
 struct NBCollection: Identifiable, Codable, Equatable {
     let id: String
     /// The target app's debug URL scheme for "login on sim". Per collection, because each
     /// catalogue describes one app: switching collections switches the app you deeplink into.
     var deeplinkScheme: String
+    /// The team room this collection syncs through, if any. nil = local-only (the solo
+    /// persona is the app with this field empty, §14.1).
+    var room: NBRoomConfig?
     var workspace: NBWorkspace
 
     /// Passthrough, not a second stored field — a stored copy could drift from the
@@ -30,24 +71,27 @@ struct NBCollection: Identifiable, Codable, Equatable {
         set { workspace.name = newValue }
     }
 
-    init(id: String = UUID().uuidString, deeplinkScheme: String = "", workspace: NBWorkspace) {
+    init(id: String = UUID().uuidString, deeplinkScheme: String = "", room: NBRoomConfig? = nil, workspace: NBWorkspace) {
         self.id = id
         self.deeplinkScheme = deeplinkScheme
+        self.room = room
         self.workspace = workspace
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, deeplinkScheme, workspace
+        case id, deeplinkScheme, room, workspace
     }
 
-    /// Lenient by design: only the workspace is fatal. `id` and `deeplinkScheme` are
-    /// local-only, settings-like fields (they never travel in exports), so a hand-edited
-    /// file missing them heals with fresh defaults — the same leniency the persisted
-    /// settings get, and not a compatibility path.
+    /// Lenient by design: only the workspace is fatal. `id`, `deeplinkScheme` and `room`
+    /// are local-only, settings-like fields (they never travel in exports as part of the
+    /// collection — the room address travels separately in the transfer file), so a
+    /// hand-edited file missing them heals with fresh defaults — the same leniency the
+    /// persisted settings get, and not a compatibility path.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         deeplinkScheme = try container.decodeIfPresent(String.self, forKey: .deeplinkScheme) ?? ""
+        room = try container.decodeIfPresent(NBRoomConfig.self, forKey: .room)
         workspace = try container.decode(NBWorkspace.self, forKey: .workspace)
     }
 }

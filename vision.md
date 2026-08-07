@@ -665,6 +665,91 @@ Generate button exists to make easy.
    notify-when-free notification body — now says "in use"/"use", found by an exhaustive
    sweep and pinned by the copy in place. Internal identifiers keep their names.
 
+### 13.10 The MQTT room, implemented (2026-08-07)
+
+§14.2 stopped being a sketch the same day §13.9's retest went green. The whole path from
+"the store emitted a change" to "a second peer's catalogue converged over a real broker"
+is code, in five phases that each landed with the full suite green (195 → 268 tests):
+
+- **Phase A — the model can carry conflicts.** `NBElement` gained `updatedAt`/`updatedBy`
+  (LWW with a deterministic tie-break), `NBGroup` a schema stamp, `NBWorkspace` real
+  tombstones (a deletion is a message, not an absence — clearing a retained topic
+  delivers nothing to a Mac that was offline, and its stale copy would resurrect the row)
+  and a rename stamp. Every local mutation primitive in `CollectionStore` stamps and
+  emits a `SyncChange` through a closure sink; the remote-apply extension
+  (`CollectionStore+SyncApply`) mutates without ever emitting — echo suppression by
+  construction, not by flag. LWW clamps future timestamps (a skewed clock must not win
+  every conflict forever), preserves local `isFavorite` and `claimedBy` (personal state
+  and claim-topic state never ride the element payload), and `applyRemoteClaim` inserts
+  the claimant into `members` first — without that, `releaseOrphanedClaims` silently
+  wipes every remote claim at the next launch. Claim writes go through a dedicated
+  `setClaim` that does NOT bump the content stamp, or marking a row in use would beat a
+  teammate's real edit. Local stamps truncate to wire precision (milliseconds), or two
+  peers editing within one millisecond diverge permanently. The format stamps stay at 1
+  — pre-release there is no version history to keep (§14.5): the old-shaped state.json,
+  exports and snapshots simply fail decode and reset or refuse, which is the same
+  outcome with no v1/v2 ledger accumulating.
+- **Phase B — the engine, proven with no network.** `RoomSession` owns the connect
+  sequence: subscribe, publish a non-retained barrier to its own sync topic (retained
+  replay is delivered first, so the barrier's echo marks replay complete), buffer, apply
+  in structural order (meta → schemas → elements → claims → presence — replay is
+  unordered across topics and a claim can arrive before its element), then the
+  first-connect asymmetry: an empty room is seeded from local state; a non-empty room
+  REPLACES a never-synced collection (after a forced snapshot) — which is what keeps two
+  teammates who imported the same file from double-pushing every row under re-minted
+  element ids. Rejoins LWW-merge then reconcile-push (newer local edits, new local
+  elements, offline deletions, claims made while away). The wrong room password is
+  proven against one payload BEFORE the destructive adopt — GCM authenticates, so a typo
+  fails loudly and touches nothing. A deterministic in-memory broker (`LoopbackBroker`,
+  pump-based, no timing) drives 15 convergence scenarios; it caught two protocol-shaped
+  bugs unit tests couldn't (subscriptions surviving reconnect turned every rejoin into a
+  re-seed; adoption's own creation timestamp beat the room's legitimate rename).
+- **Phase C — the real transport.** mqtt-nio (Apache-2.0) became the project's **first
+  dependency**. `MQTTSyncTransport`: MQTT 5, clean start, QoS 1, TLS mandatory
+  (`mqtts://`, `wss://` for corp firewalls; plain `mqtt://` refuses anything but
+  localhost), keepalive 45 s (the "closed lid frees claims in a minute or two" number),
+  exponential reconnect 1 s → 60 s, sleep/wake via NSWorkspace notifications, LWT = the
+  sealed offline presence, stable client id `nb-<memberID>` so a second connect
+  supersedes rather than ghosts. Two MQTT subtleties are load-bearing: noLocal only
+  suppresses *live* echoes, so publishes hold until in-flight SUBACKs land (otherwise
+  your own message comes back as retained replay), and a graceful disconnect flushes the
+  outbox first (or the goodbye eats its own offline presence). The mosquitto integration
+  suite (5 tests, self-skipping without a broker on :1883, the SimctlBridge pattern)
+  proved retained round-trip/clear, the barrier echo, and the will firing on session
+  takeover.
+- **Phase D — the UI.** Room setup/join/leave in the collection ▾ menu beside the
+  deeplink scheme (same per-collection, dialog-driven shape; password fields carry the
+  Generate button, §14.5.3). Room passwords live in their own Keychain service
+  (`flourix.notchboard.rooms`, out of the element sweep's reach, accounts hashed).
+  The amber brand square in the header and the collapsed notch became the connection dot
+  (`NBColor.syncState`: amber local/connecting, green live, red failed — never animated),
+  with "n online" beside the switcher. A claim whose holder is offline *renders* free
+  (" · offline" in the status line, button and tooltip) and using it is a deliberate
+  takeover — the mark itself is never mutated by presence. Exports embed the room
+  address (never the password, and never the local firstSyncCompleted flag); importing a
+  file that carries one triggers §14.3's "join as <name>?" prompt, with "not now"
+  keeping the address on the collection for a later join from the menu.
+- **Phase E — verified end to end on one Mac.** `PeerHarnessTests`: two complete peers
+  (store + engine + real MQTT transport) against local mosquitto walk the whole §14.3
+  story — seed, adopt with re-minted ids, live edit, claim with presence and name
+  attribution, delete, graceful goodbye rendering the mark free, and wake-up replay as
+  the catch-up. 268 tests total, three consecutive full-suite runs green against a live
+  broker, Release build zero warnings in app sources, runtime launch clean (0.1% CPU
+  idle) with the v1 state.json taking the corrupt-backup reset exactly as designed.
+
+Not yet exercised: a second *human* on a second Mac (the harness stands in), a managed
+TLS broker (only local plaintext mosquitto so far — the `mqtts://` path is code-complete
+but has never shaken hands with a real certificate), the `wss://` fallback, and the room
+dialogs by hand. Those are the next dogfooding session's list.
+
+Accepted rough edges, documented rather than hidden: a claim released while offline is
+reinstated by its own retained twin on reconnect and ages out through the auto-release
+sweep (a claim is a status light; a minute of staleness beat a special-case protocol);
+broker-side tombstones expire after 30 days in step with the local prune, so a peer
+offline longer can resurrect a deleted row; and LWW still silently drops one side of a
+genuinely simultaneous same-element edit, §14.2's known trade with `automerge-swift` as
+the escalation path.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between
@@ -821,11 +906,19 @@ is already its API spec. Until then, no server.
 
 ### 14.7 Open questions
 
-- Unify the room password and the export password into one per-collection passphrase, or
-  keep them separate? (Separate is simpler to reason about; unified is less to share.)
-- ~~Should *all* payloads be encrypted, not just secret fields?~~ **Reviewed 2026-08-07
-  against a real export file (§13.9): the split stays. Revisit when a catalogue holds a
-  real client's identifiers, or when a security review asks.**
+- ~~Unify the room password and the export password into one per-collection passphrase,
+  or keep them separate?~~ **Decided 2026-08-07: separate.** Rotating the room password
+  (the only way to remove a leaver) must never invalidate previously shared export
+  files, and vice versa. The HKDF info strings differ (`nb-export` / `nb-room`), so even
+  an accidentally reused password yields unrelated keys.
+- ~~Should *all* payloads be encrypted, not just secret fields?~~ **Split answer, both
+  decided 2026-08-07.** For *files*, the §13.9 review stands: secrets-only, readable
+  catalogue, revisit on a real client's data or a security review. For the *room*, the
+  answer is the opposite: every payload is sealed under the room key — a file is read
+  once by someone you sent it to, a broker operator watches the whole catalogue stream
+  past continuously. The broker sees topic structure, sizes and timing, nothing else.
+  Lost mosquitto_sub debuggability is compensated by the local `sync` log category.
 - Snapshot cadence and retention numbers.
-- Is the WebSocket-443 transport a fallback or the default?
+- Is the WebSocket-443 transport a fallback or the default? (Implemented as a fallback —
+  `wss://` addresses work today; untested against a real corp proxy.)
 - Passphrase format (word-list vs random characters).

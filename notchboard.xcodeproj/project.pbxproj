@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA10000000000000000000F3 /* MQTTNIO in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000F2 /* MQTTNIO */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		7E57AB1E000000000000C008 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -46,6 +50,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA10000000000000000000F3 /* MQTTNIO in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +118,7 @@
 			);
 			name = notchboard;
 			packageProductDependencies = (
+				AA10000000000000000000F2 /* MQTTNIO */,
 			);
 			productName = notchboard;
 			productReference = EA8D3518300958FF009EED09 /* notchboard.app */;
@@ -146,6 +152,9 @@
 			);
 			mainGroup = EA8D350F300958FF009EED09;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA10000000000000000000F1 /* XCRemoteSwiftPackageReference "mqtt-nio" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EA8D3519300958FF009EED09 /* Products */;
 			projectDirPath = "";
@@ -459,6 +468,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA10000000000000000000F1 /* XCRemoteSwiftPackageReference "mqtt-nio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swift-server-community/mqtt-nio";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA10000000000000000000F2 /* MQTTNIO */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA10000000000000000000F1 /* XCRemoteSwiftPackageReference "mqtt-nio" */;
+			productName = MQTTNIO;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EA8D3510300958FF009EED09 /* Project object */;
 }

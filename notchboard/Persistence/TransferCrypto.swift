@@ -15,7 +15,7 @@ import CommonCrypto
 import CryptoKit
 import Foundation
 
-/// The encrypted-secrets block inside a v2 export. Salt and rounds travel with the file so
+/// The encrypted-secrets block inside an export. Salt and rounds travel with the file so
 /// exports stay decryptable when the default cost rises later.
 struct SecretsEnvelope: Codable, Equatable {
     var salt: Data
@@ -24,7 +24,9 @@ struct SecretsEnvelope: Codable, Equatable {
     var sealed: Data
 }
 
-enum TransferCrypto {
+/// nonisolated: pure functions over value types, shared with RoomCrypto's off-main key
+/// derivation — main-actor isolation would forbid the deliberate slow work moving off.
+nonisolated enum TransferCrypto {
     /// PBKDF2-HMAC-SHA256 iteration count, per current OWASP guidance (600k, 2023).
     /// Costs a fraction of a second once per export/import — a modal moment, not a hot path.
     static let defaultRounds = 600_000
@@ -73,6 +75,20 @@ enum TransferCrypto {
     }
 
     private static func deriveKey(from password: String, salt: Data, rounds: Int) throws -> SymmetricKey {
+        // HKDF binds the key to this exact purpose, so the same password+salt derivation
+        // can never be reused for a different feature with an identical key — the room
+        // key (RoomCrypto, info "nb-room") shares the stretch, never the key.
+        HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: try stretch(password: password, salt: salt, rounds: rounds),
+            info: Data("nb-export".utf8),
+            outputByteCount: 32
+        )
+    }
+
+    /// The expensive PBKDF2 stage, shared by every password-derived key in the app.
+    /// Callers MUST domain-separate the result through HKDF with a purpose-specific info
+    /// string — this raw stretch is never a usable key on its own.
+    static func stretch(password: String, salt: Data, rounds: Int) throws -> SymmetricKey {
         var derived = Data(count: 32)
         let passwordData = Data(password.utf8)
         let status = derived.withUnsafeMutableBytes { derivedBytes in
@@ -93,12 +109,6 @@ enum TransferCrypto {
             }
         }
         guard status == kCCSuccess else { throw CryptoError.keyDerivationFailed }
-        // HKDF binds the key to this exact purpose, so the same password+salt derivation
-        // can never be reused for a different feature with an identical key.
-        return HKDF<SHA256>.deriveKey(
-            inputKeyMaterial: SymmetricKey(data: derived),
-            info: Data("nb-export-v2".utf8),
-            outputByteCount: 32
-        )
+        return SymmetricKey(data: derived)
     }
 }

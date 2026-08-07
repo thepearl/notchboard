@@ -14,8 +14,9 @@
 import AppKit
 
 /// Keeps the Generate button's target alive for the duration of the modal — NSButton does
-/// not retain its target.
-private final class GeneratePassphraseTarget: NSObject {
+/// not retain its target. Internal: the room dialogs reuse it (§14.5.3 — the generator is
+/// one click away on every password field).
+final class GeneratePassphraseTarget: NSObject {
     private let field: NSTextField
     init(field: NSTextField) { self.field = field }
     @objc func generate() {
@@ -44,6 +45,21 @@ enum PromptAccessory {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 24))
         field.frame = NSRect(x: 0, y: 0, width: 338, height: 24)
         container.addSubview(field)
+        return container
+    }
+
+    /// The room-setup triplet: broker address, room name, password + Generate. Same fixed
+    /// frames, stacked by hand, rows 30pt apart top-down.
+    static func roomSetup(broker: NSTextField, room: NSTextField, password: NSTextField, generate: NSButton) -> NSView {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 90))
+        broker.frame = NSRect(x: 0, y: 63, width: 338, height: 24)
+        room.frame = NSRect(x: 0, y: 33, width: 338, height: 24)
+        password.frame = NSRect(x: 0, y: 3, width: 232, height: 24)
+        generate.frame = NSRect(x: 240, y: 0, width: 98, height: 30)
+        container.addSubview(broker)
+        container.addSubview(room)
+        container.addSubview(password)
+        container.addSubview(generate)
         return container
     }
 
@@ -96,6 +112,13 @@ enum WorkspaceExportFlow {
     }
 }
 
+/// What an interactive import hands back: the catalogue, plus the room address the file
+/// carried (§14.3 — the file is the invitation; the caller offers the join).
+struct ImportedCollection {
+    var workspace: NBWorkspace
+    var room: NBRoomConfig?
+}
+
 @MainActor
 enum WorkspaceImportFlow {
     private enum PasswordChoice {
@@ -108,14 +131,14 @@ enum WorkspaceImportFlow {
     /// prompting for the password, re-prompting on a wrong one, and offering to import
     /// without secrets. Returns nil when the user cancels outright. Throws
     /// WorkspaceTransfer.ImportError for files that can't be imported at all.
-    static func importInteractively(from url: URL) throws -> NBWorkspace? {
+    static func importInteractively(from url: URL) throws -> ImportedCollection? {
         guard let data = try? Data(contentsOf: url) else {
             throw WorkspaceTransfer.ImportError.unreadable
         }
         let file = try WorkspaceTransfer.readFile(from: data)
         guard file.secrets != nil else {
             // Secretless catalogue — nothing to unlock.
-            return file.workspace
+            return ImportedCollection(workspace: file.workspace, room: file.room)
         }
 
         var wrongAttempt = false
@@ -124,10 +147,13 @@ enum WorkspaceImportFlow {
             case .cancelled:
                 return nil
             case .skip:
-                return file.workspace
+                return ImportedCollection(workspace: file.workspace, room: file.room)
             case .password(let password):
                 do {
-                    return try WorkspaceTransfer.unlockingSecrets(of: file, password: password)
+                    return ImportedCollection(
+                        workspace: try WorkspaceTransfer.unlockingSecrets(of: file, password: password),
+                        room: file.room
+                    )
                 } catch WorkspaceTransfer.ImportError.wrongPassword {
                     wrongAttempt = true
                 }

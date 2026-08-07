@@ -17,15 +17,18 @@ struct NBCollectionModelTests {
 
     @Test("A payload without local-only fields decodes with fresh defaults")
     func lenientDecoding() throws {
-        let json = #"{"workspace":{"name":"w","groupOrder":[],"groups":{},"members":{}}}"#
+        // The workspace itself stays strict (tombstones is a required key — the no-compat
+        // rule); it is only the collection's local-only fields that heal with defaults.
+        let json = #"{"workspace":{"name":"w","nameUpdatedAt":0,"groupOrder":[],"groups":{},"members":{},"tombstones":[]}}"#
         let collection = try JSONDecoder().decode(NBCollection.self, from: Data(json.utf8))
         #expect(!collection.id.isEmpty)
         #expect(collection.deeplinkScheme.isEmpty)
+        #expect(collection.room == nil)
     }
 
     @Test("Decoding the same payload twice yields two distinct local ids")
     func idIsLocal() throws {
-        let json = Data(#"{"workspace":{"name":"w","groupOrder":[],"groups":{},"members":{}}}"#.utf8)
+        let json = Data(#"{"workspace":{"name":"w","nameUpdatedAt":0,"groupOrder":[],"groups":{},"members":{},"tombstones":[]}}"#.utf8)
         let first = try JSONDecoder().decode(NBCollection.self, from: json)
         let second = try JSONDecoder().decode(NBCollection.self, from: json)
         #expect(first.id != second.id, "the id must be local so importing an export twice yields two collections")
