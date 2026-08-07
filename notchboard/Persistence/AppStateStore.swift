@@ -19,13 +19,21 @@ import Foundation
 import os
 
 struct PersistedAppState: Codable, Equatable {
+    /// A plain stamp written for the future: real version history begins at the first
+    /// public release. Until then there is deliberately NO compatibility code here — the
+    /// app is unpublished with one user, so a schema change resets through the
+    /// corrupt-backup path in `load()` instead of accumulating migration shims
+    /// (decision 2026-08-07, vision.md §14.5).
     static let currentSchemaVersion = 1
 
     var schemaVersion: Int
-    var workspace: NBWorkspace
+    var collections: [NBCollection]
+    var activeCollectionID: String
+    /// Stable local identity: what this user's claims are attributed to (vision.md §14.2).
+    /// Generated on first launch and never changed after.
+    var memberID: String
     var autoReleaseMinutes: Int
     var startExpanded: Bool
-    var deeplinkScheme: String
     var dockEdge: NBDockEdge
     var onboardingCompleted: Bool
     var onboardingName: String
@@ -33,23 +41,45 @@ struct PersistedAppState: Codable, Equatable {
     /// time it appears, even across a relaunch.
     var coachMarkPending: Bool
     var hotKeyModifier: NBHotKeyModifier
+    /// "Don't warn me again" from the production-mixing dialog.
+    var suppressProductionMixWarning: Bool
+
+    /// The active collection's catalogue — the shape tests mostly build against. Falls
+    /// back to the first collection if the active id is stale.
+    var workspace: NBWorkspace {
+        get {
+            (collections.first { $0.id == activeCollectionID } ?? collections.first)?.workspace
+                ?? NBWorkspace(name: "", groupOrder: [], groups: [:], members: [:])
+        }
+        set {
+            if let index = collections.firstIndex(where: { $0.id == activeCollectionID }) {
+                collections[index].workspace = newValue
+            } else if !collections.isEmpty {
+                collections[0].workspace = newValue
+            }
+        }
+    }
 
     init(
-        workspace: NBWorkspace,
+        collections: [NBCollection],
+        activeCollectionID: String,
+        memberID: String,
         autoReleaseMinutes: Int,
         startExpanded: Bool,
-        deeplinkScheme: String,
         dockEdge: NBDockEdge,
         onboardingCompleted: Bool,
         onboardingName: String,
         coachMarkPending: Bool = false,
-        hotKeyModifier: NBHotKeyModifier = .control
+        hotKeyModifier: NBHotKeyModifier = .control,
+        suppressProductionMixWarning: Bool = false
     ) {
+        self.suppressProductionMixWarning = suppressProductionMixWarning
         self.schemaVersion = Self.currentSchemaVersion
-        self.workspace = workspace
+        self.collections = collections
+        self.activeCollectionID = activeCollectionID
+        self.memberID = memberID
         self.autoReleaseMinutes = autoReleaseMinutes
         self.startExpanded = startExpanded
-        self.deeplinkScheme = deeplinkScheme
         self.dockEdge = dockEdge
         self.onboardingCompleted = onboardingCompleted
         self.onboardingName = onboardingName
@@ -57,21 +87,51 @@ struct PersistedAppState: Codable, Equatable {
         self.hotKeyModifier = hotKeyModifier
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, collections, activeCollectionID, memberID
+        case autoReleaseMinutes, startExpanded, dockEdge
+        case onboardingCompleted, onboardingName, coachMarkPending, hotKeyModifier
+        case suppressProductionMixWarning
+    }
+
     /// Settings decode leniently (missing keys fall back to defaults) so adding a field
-    /// never wipes a user's workspace; only a missing/undecodable workspace is fatal to
-    /// the load.
+    /// never wipes a user's catalogue. The catalogue itself is strict: no non-empty
+    /// `collections`, no load — the file takes the corrupt-backup reset path in `load()`,
+    /// by design (no pre-release compatibility code; see `currentSchemaVersion`).
+    /// Encoding is synthesised — nothing is written beyond the properties themselves.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        workspace = try container.decode(NBWorkspace.self, forKey: .workspace)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? Self.currentSchemaVersion
+        // Exact match, same rule as imports and snapshots: another version of this file is
+        // another build's business, and pre-release the answer is the reset path.
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: container.codingPath,
+                debugDescription: "state schema \(schemaVersion) is not this build's \(Self.currentSchemaVersion)"
+            ))
+        }
+        collections = try container.decode([NBCollection].self, forKey: .collections)
+        guard !collections.isEmpty else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: container.codingPath,
+                debugDescription: "state carries no collections"
+            ))
+        }
+
+        let storedActiveID = try container.decodeIfPresent(String.self, forKey: .activeCollectionID)
+        activeCollectionID = collections.contains { $0.id == storedActiveID }
+            ? storedActiveID!
+            : collections[0].id
+        memberID = try container.decodeIfPresent(String.self, forKey: .memberID) ?? UUID().uuidString
+
         autoReleaseMinutes = try container.decodeIfPresent(Int.self, forKey: .autoReleaseMinutes) ?? 60
         startExpanded = try container.decodeIfPresent(Bool.self, forKey: .startExpanded) ?? true
-        deeplinkScheme = try container.decodeIfPresent(String.self, forKey: .deeplinkScheme) ?? ""
         dockEdge = try container.decodeIfPresent(NBDockEdge.self, forKey: .dockEdge) ?? .right
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
         onboardingName = try container.decodeIfPresent(String.self, forKey: .onboardingName) ?? ""
         coachMarkPending = try container.decodeIfPresent(Bool.self, forKey: .coachMarkPending) ?? false
         hotKeyModifier = try container.decodeIfPresent(NBHotKeyModifier.self, forKey: .hotKeyModifier) ?? .control
+        suppressProductionMixWarning = try container.decodeIfPresent(Bool.self, forKey: .suppressProductionMixWarning) ?? false
     }
 }
 
@@ -116,22 +176,14 @@ enum AppStateStore {
             let data = try Data(contentsOf: fileURL)
             var state = try JSONDecoder().decode(PersistedAppState.self, from: data)
 
-            // A file written by a newer build decodes best-effort here (unknown keys are
-            // dropped) and the next save re-stamps the current schema version — silently
-            // discarding whatever the newer schema stored. Keep a copy so that downgrade
-            // is recoverable instead of invisible.
-            if state.schemaVersion > PersistedAppState.currentSchemaVersion {
-                let backupURL = directoryURL.appendingPathComponent("state.json.v\(state.schemaVersion)")
-                try? FileManager.default.removeItem(at: backupURL)
-                try? FileManager.default.copyItem(at: fileURL, to: backupURL)
-                logger.warning("state.json has newer schema \(state.schemaVersion) (this build: \(PersistedAppState.currentSchemaVersion)); backed up before best-effort load")
-            }
-
-            // Duplicate element IDs (hand-edited file) collide in the Keychain and break
-            // SwiftUI identity — resolve them before the placeholder swap, so the first
+            // Duplicate element IDs (hand-edited file, or two collections seeded from the
+            // same source) collide in the Keychain and break SwiftUI identity — resolve
+            // them across *all* collections before the placeholder swap, so the first
             // occurrence keeps its ID and its stored secret.
-            state.workspace.deduplicateElementIDs()
-            state.workspace = restoringSecrets(into: state.workspace)
+            state.collections.deduplicateElementIDsAcrossCollections()
+            for index in state.collections.indices {
+                state.collections[index].workspace = restoringSecrets(into: state.collections[index].workspace)
+            }
             return state
         } catch {
             logger.error("unreadable state file, backing up to state.json.corrupt: \(error)")
@@ -158,10 +210,16 @@ enum AppStateStore {
         pendingSave = nil
         do {
             var sanitised = state
-            sanitised.workspace = strippingSecrets(from: state.workspace)
+            for index in sanitised.collections.indices {
+                sanitised.collections[index].workspace = strippingSecrets(from: sanitised.collections[index].workspace)
+            }
             try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(sanitised)
             try data.write(to: fileURL, options: .atomic)
+            // Piggyback the snapshot cadence on successful persists: `state` still carries
+            // the real secret values (sanitisation happened on a copy), which is exactly
+            // what a recovery point needs. The interval gate inside makes this periodic.
+            SnapshotStore.recordIfDue(collections: state.collections, activeCollectionID: state.activeCollectionID)
         } catch {
             // Best-effort persistence — a failed save shouldn't crash or block the UI.
             logger.error("failed to persist state: \(error)")

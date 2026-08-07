@@ -37,31 +37,51 @@ struct AddElementView: View {
 
             ForEach(viewModel.activeGroup.fields) { field in
                 LabeledField(labelText: "\(field.label.uppercased()) · \(field.type.rawValue)") {
-                    NBTextField(
-                        text: Binding(
+                    FieldInput(
+                        field: field,
+                        value: Binding(
                             get: { viewModel.addValues[field.key] ?? "" },
                             set: { viewModel.addValues[field.key] = $0 }
-                        ),
-                        placeholder: field.type == .secret ? "secret — masked in lists" : (field.type == .bool ? "true / false" : "")
+                        )
                     )
                 }
             }
 
-            LabeledField(labelText: "ENVIRONMENT") {
-                HStack(spacing: 6) {
-                    ForEach([NBEnvironment.dev, .stg, .prd]) { env in
-                        EnvChip(label: env.rawValue, isActive: viewModel.addEnvironment == env) {
-                            viewModel.addEnvironment = env
+            LabeledField(labelText: "ENVIRONMENTS") {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        ForEach(NBEnvironment.assignable) { env in
+                            EnvChip(
+                                label: env.rawValue,
+                                isActive: viewModel.addEnvironments.contains(env),
+                                activeColor: env.color
+                            ) {
+                                toggle(env)
+                            }
                         }
                     }
+                    Text("pick every environment these values are valid in")
+                        .font(NBFont.mono(9))
+                        .foregroundStyle(NBColor.textMuted)
                 }
             }
 
             LabeledField(labelText: "NOTE (optional)") {
-                NBTextEditor(text: $viewModel.addNote, placeholder: "context a teammate would want, e.g. “no card on file”")
+                NBTextEditor(text: $viewModel.addNote, placeholder: "why this element exists, e.g. “no card on file”")
             }
         }
         .padding(.top, 17)
+    }
+
+    /// Toggling an environment is one click, except the one combination worth a second
+    /// thought: production alongside anything else (see EnvironmentWarningDialog).
+    private func toggle(_ env: NBEnvironment) {
+        if viewModel.productionMixWarningNeeded(togglingOn: env) {
+            let answer = EnvironmentWarningDialog.confirmProductionMix(elementName: viewModel.addName)
+            if answer.suppressFuture { viewModel.suppressProductionMixWarning = true }
+            guard answer.confirmed else { return }
+        }
+        viewModel.toggleAddEnvironment(env)
     }
 
     private var actions: some View {
@@ -89,6 +109,76 @@ struct AddElementView: View {
     }
 }
 
+/// The control a field's type deserves. A `bool` gets two states to choose between, a
+/// `picker` gets its group's options, a `number` refuses letters as you type, and
+/// everything else is a text field with a placeholder that says what's expected. Values
+/// are still validated on save (NBFieldValidation) — controls shape input, they don't
+/// guarantee it, since imports and hand-edited files bypass them entirely.
+private struct FieldInput: View {
+    let field: NBField
+    @Binding var value: String
+
+    var body: some View {
+        switch field.type {
+        case .bool:
+            BoolSelector(value: $value)
+        case .picker where !field.options.isEmpty:
+            OptionSelector(options: field.options, value: $value)
+        default:
+            NBTextField(text: $value, placeholder: field.type.placeholder)
+                .onChange(of: value) { _, updated in
+                    // Filtering here rather than rejecting on save keeps the field honest
+                    // while typing: a stray letter in a price simply never appears.
+                    let filtered = NBFieldValidation.filtered(updated, for: field.type)
+                    if filtered != updated { value = filtered }
+                }
+        }
+    }
+}
+
+/// true / false as two chips. Tapping the active one clears the value, because a bool that
+/// was never set is a real state ("unknown") and the old free-text field could express it.
+private struct BoolSelector: View {
+    @Binding var value: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(NBFieldValidation.boolValues, id: \.self) { option in
+                EnvChip(
+                    label: option,
+                    isActive: value.lowercased() == option,
+                    activeColor: option == "true" ? NBColor.green : NBColor.textSecondaryAlt
+                ) {
+                    value = value.lowercased() == option ? "" : option
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A real picker for `picker` fields, driven by the options defined on the group's schema.
+private struct OptionSelector: View {
+    let options: [String]
+    @Binding var value: String
+
+    private static let noneTag = ""
+
+    var body: some View {
+        Picker("", selection: $value) {
+            Text("—").tag(Self.noneTag)
+            ForEach(options, id: \.self) { option in
+                Text(option).tag(option)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .font(NBFont.mono(10.5))
+        .tint(NBColor.amber)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Small label + content wrapper matching the prototype's `LABEL` / control stacking.
 struct LabeledField<Content: View>: View {
     let labelText: String
@@ -97,7 +187,7 @@ struct LabeledField<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(labelText)
-                .nbMonoLabel(8, tracking: 0.8)
+                .nbMonoLabel(9.5, tracking: 0.8)
             content()
         }
     }

@@ -58,7 +58,7 @@ struct NewGroupView: View {
     private var fieldsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("FIELDS — every element shares this shape")
-                .nbMonoLabel(8, tracking: 0.8)
+                .nbMonoLabel(9.5, tracking: 0.8)
                 .padding(.top, 13)
 
             VStack(spacing: 6) {
@@ -170,39 +170,69 @@ private struct FieldEditorRow: View {
     @Binding var field: NBField
     let onRemove: () -> Void
 
+    /// Edited as raw text rather than through a computed binding over `field.options`:
+    /// round-tripping the array on every keystroke ate the comma the moment you typed it.
+    @State private var optionsDraft = ""
+
     var body: some View {
-        HStack(spacing: 9) {
-            Text("⋮⋮")
-                .font(NBFont.mono(9))
-                .foregroundStyle(NBColor.textMuted)
-
-            TextField("", text: $field.label)
-                .textFieldStyle(.plain)
-                .font(NBFont.mono(10.5))
-                .foregroundStyle(NBColor.textFieldValue)
-
-            Picker("", selection: $field.type) {
-                ForEach(NBFieldType.allCases) { type in
-                    Text(type.rawValue).tag(type)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .font(NBFont.mono(8.5))
-            .tint(field.type.color)
-            .fixedSize()
-
-            Button(action: onRemove) {
-                Text("×")
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 9) {
+                Text("⋮⋮")
                     .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.textMuted)
+
+                TextField("", text: $field.label)
+                    .textFieldStyle(.plain)
+                    .font(NBFont.mono(10.5))
+                    .foregroundStyle(NBColor.textFieldValue)
+
+                Picker("", selection: $field.type) {
+                    ForEach(NBFieldType.allCases) { type in
+                        Text(type.rawValue).tag(type)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .font(NBFont.mono(9.5))
+                .tint(field.type.color)
+                .fixedSize()
+
+                Button(action: onRemove) {
+                    Text("×")
+                        .font(NBFont.mono(12))
+                        .foregroundStyle(NBColor.textMuted)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.nbPlain)
+                .help("remove field")
             }
-            .buttonStyle(.nbPlain)
+
+            // A picker field with no options is a dead control, so the schema is where its
+            // choices get defined — the element form then renders a real menu.
+            if field.type == .picker {
+                HStack(spacing: 7) {
+                    Text("options")
+                        .font(NBFont.mono(9, weight: .medium))
+                        .foregroundStyle(NBColor.typePicker)
+                    TextField("", text: $optionsDraft, prompt: Text("core, premium, limited").foregroundStyle(NBColor.textMuted))
+                        .textFieldStyle(.plain)
+                        .font(NBFont.mono(10))
+                        .foregroundStyle(NBColor.textFieldValue)
+                }
+                .padding(.leading, 19)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(NBColor.field)
         .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+        .onAppear { optionsDraft = field.options.joined(separator: ", ") }
+        .onChange(of: optionsDraft) { _, updated in
+            field.options = updated
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
     }
 }

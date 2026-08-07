@@ -29,7 +29,7 @@ struct SettingsView: View {
                 }
 
                 Stepper(value: $viewModel.autoReleaseMinutes, in: NotchboardViewModel.autoReleaseRange, step: 5) {
-                    Text("Auto-release claims after \(viewModel.autoReleaseMinutes) min idle")
+                    Text("Auto-release in-use elements after \(viewModel.autoReleaseMinutes) min idle")
                 }
 
                 Picker("Global shortcut", selection: $viewModel.hotKeyModifier) {
@@ -67,11 +67,13 @@ struct SettingsView: View {
             }
 
             Section {
-                TextField("Debug URL scheme", text: $viewModel.deeplinkScheme, prompt: Text("e.g. brewly"))
+                TextField("Debug URL scheme", text: $viewModel.deeplinkScheme, prompt: Text("e.g. notchdemo"))
+                    .onSubmit { viewModel.setDeeplinkScheme(viewModel.deeplinkScheme) }
+                Toggle("Warn before mixing production with another environment", isOn: $viewModel.suppressProductionMixWarning.inverted)
             } header: {
-                Text("Simulator deeplink")
+                Text("Simulator deeplink — “\(viewModel.workspace.name)”")
             } footer: {
-                Text("“Login on sim” fires <scheme>://debug/login?user=<username> into the booted Simulator via xcrun simctl. Your app's debug build must register this URL scheme and handle that route.")
+                Text("“Login on sim” fires <scheme>://debug/login?user=<username> into the booted Simulator via xcrun simctl. Your app's debug build must register this URL scheme and handle that route. Stored per collection: each catalogue describes one app, so switching collections switches the app you deeplink into.")
                     .foregroundStyle(.secondary)
             }
 
@@ -84,6 +86,15 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 420, height: 320)
+    }
+}
+
+/// Lets a "suppress X" flag drive a "warn me about X" toggle without storing the same
+/// answer twice — the stored form has to stay suppression-shaped because that is what
+/// NSAlert's own "don't show again" checkbox produces.
+private extension Binding where Value == Bool {
+    var inverted: Binding<Bool> {
+        Binding<Bool>(get: { !wrappedValue }, set: { wrappedValue = !$0 })
     }
 }
 

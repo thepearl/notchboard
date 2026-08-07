@@ -23,8 +23,12 @@ enum NBFont {
 }
 
 /// Reusable text-style presets mirroring the prototype's recurring type combinations.
+///
+/// The default label size went 8 → 9.5 in the same legibility pass as NBColor's greys:
+/// 8pt mono with 0.6 tracking is a caption, and these are the labels naming every field
+/// in the app.
 extension View {
-    func nbMonoLabel(_ size: CGFloat = 8, color: Color = NBColor.textMuted, tracking: CGFloat = 0.6) -> some View {
+    func nbMonoLabel(_ size: CGFloat = 9.5, color: Color = NBColor.textMuted, tracking: CGFloat = 0.6) -> some View {
         self.font(NBFont.mono(size, weight: .medium))
             .foregroundStyle(color)
             .tracking(tracking)

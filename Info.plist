@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Partial Info.plist, merged with the generated one (GENERATE_INFOPLIST_FILE stays
+	  YES; INFOPLIST_FILE points here). Kept OUTSIDE the synchronized notchboard/ folder
+	  on purpose: inside it, the build both generates and copies an Info.plist and fails
+	  with "multiple commands produce" - the exact collision NotchDemo hit (vision.md
+	  section 13.6). Array-valued keys like CFBundleDocumentTypes cannot be expressed as
+	  INFOPLIST_KEY_ build settings, which is why this file exists at all.
+
+	  ".notchboard" is the extension - deliberately single-dot, because LaunchServices
+	  resolves multi-dot extensions by their last component and could never associate a
+	  ".something.json" spelling with anything but a JSON handler.
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Notchboard Collection</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.flourix.notchboard.collection</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.flourix.notchboard.collection</string>
+			<key>UTTypeDescription</key>
+			<string>Notchboard Collection</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>notchboard</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

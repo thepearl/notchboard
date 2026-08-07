@@ -41,7 +41,7 @@ enum Notifier {
         guard isAvailable else { return }
         let content = UNMutableNotificationContent()
         content.title = "Now free: \(name)"
-        content.body = "The element you were watching is available to claim."
+        content.body = "The element you were watching is free to use."
         content.sound = .default
 
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

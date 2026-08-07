@@ -42,7 +42,7 @@ struct NotchboardViewModelBasicsTests {
             return
         }
         vm.claimOrRelease(free.id)
-        #expect(vm.selectedElement(id: free.id)?.claimedBy?.who == "you")
+        #expect(vm.selectedElement(id: free.id)?.claimedBy?.who == vm.selfMemberID, "claims are attributed to the stable member id, not the literal \"you\"")
         vm.claimOrRelease(free.id)
         #expect(vm.selectedElement(id: free.id)?.claimedBy == nil)
     }
@@ -68,14 +68,13 @@ struct NotchboardViewModelBasicsTests {
         #expect(vm.selectedElement(id: target.id)?.claimedBy == before, "a foreign claim must not be released")
     }
 
-    @Test("The sample catalogue ships with no foreign claims to strand a solo user")
+    @Test("The sample catalogue ships with no claims at all to strand a solo user")
     func sampleHasNoForeignClaims() {
         let workspace = MockData.workspace()
-        let foreign = workspace.groups.values
+        let claims = workspace.groups.values
             .flatMap(\.elements)
             .compactMap(\.claimedBy)
-            .filter { $0.who != "you" }
-        #expect(foreign.isEmpty, "seed claims by absent teammates can never be released")
+        #expect(claims.isEmpty, "seed claims by absent owners can never be released")
         #expect(workspace.members.isEmpty)
     }
 
@@ -113,7 +112,7 @@ struct NotchboardViewModelBasicsTests {
         vm.workspace.groups[vm.activeGroupID] = group
 
         vm.takeOver(target.id)
-        #expect(vm.selectedElement(id: target.id)?.claimedBy?.who == "you")
+        #expect(vm.selectedElement(id: target.id)?.claimedBy.map(vm.isMine) == true)
     }
 
     @Test("Taking over does nothing to your own claim or a free element")
@@ -151,14 +150,14 @@ struct NotchboardViewModelBasicsTests {
         let vm = NotchboardViewModel()
         var workspace = MockData.workspace()
         if var group = workspace.groups["users"], !group.elements.isEmpty {
-            group.elements[0].claimedBy = NBClaim(who: "you", minutesAgo: 2)
+            group.elements[0].claimedBy = NBClaim(who: vm.selfMemberID, minutesAgo: 2)
             workspace.groups["users"] = group
         }
         var state = vm.persistableState(onboardingCompleted: true, onboardingName: "x")
         state.workspace = workspace
         vm.restore(from: state)
 
-        let mine = vm.workspace.groups.values.flatMap(\.elements).compactMap(\.claimedBy).filter { $0.who == "you" }
+        let mine = vm.workspace.groups.values.flatMap(\.elements).compactMap(\.claimedBy).filter { vm.isMine($0) }
         #expect(mine.count == 1)
     }
 
@@ -248,7 +247,7 @@ struct WorkspaceModelTests {
 
     @Test("Claim ages never go negative")
     func claimAgeClamped() {
-        let future = NBClaim(who: "you", claimedAt: Date().addingTimeInterval(3600))
+        let future = NBClaim(who: "m1", claimedAt: Date().addingTimeInterval(3600))
         #expect(future.minutesAgo == 0)
     }
 }
@@ -257,7 +256,7 @@ struct WorkspaceModelTests {
 struct ClaimAgeLabelTests {
 
     private func claim(minutesAgo: Int) -> NBClaim {
-        NBClaim(who: "you", minutesAgo: minutesAgo)
+        NBClaim(who: "m1", minutesAgo: minutesAgo)
     }
 
     @Test("Fresh claims read as just now")

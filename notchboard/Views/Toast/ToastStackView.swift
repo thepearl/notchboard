@@ -50,7 +50,7 @@ private struct ToastRow: View {
         ToastStackView(toasts: [
             NBToast(id: UUID(), message: "username copied to clipboard", color: .amber),
             NBToast(id: UUID(), message: "released “Ava Lindqvist”", color: .green),
-            NBToast(id: UUID(), message: "sara has this — ping them or claim anyway", color: .red),
+            NBToast(id: UUID(), message: "sara marked this in use — take it over from the detail view", color: .amber),
         ])
         .padding(22)
     }

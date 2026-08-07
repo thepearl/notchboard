@@ -55,7 +55,16 @@ struct ClaimTooltipTests {
         vm.showClaimTooltip("e1")
         vm.scheduleClaimTooltipDismissal()
         #expect(vm.tooltipElementID == "e1", "tooltip must survive the instant of leaving the badge")
-        try? await Task.sleep(for: .milliseconds(600))
+
+        // Polled rather than a single fixed wait: the dismissal hops back to the main
+        // actor, and the whole suite is main-actor isolated, so a heavy neighbour (the
+        // PBKDF2/AES and snapshot tests) can delay the continuation well past the 350ms
+        // grace period. The contract is "it dismisses", not "it dismisses within N ms" —
+        // a fixed wait made this fail only in a full run, which reads as a product bug
+        // and isn't one.
+        for _ in 0..<60 where vm.tooltipElementID != nil {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
         #expect(vm.tooltipElementID == nil, "tooltip must dismiss after the grace period")
     }
 

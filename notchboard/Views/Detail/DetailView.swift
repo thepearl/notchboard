@@ -9,8 +9,6 @@ struct DetailView: View {
     @Bindable var viewModel: NotchboardViewModel
     let element: NBElement
 
-    @State private var confirmingDelete = false
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -26,7 +24,7 @@ struct DetailView: View {
 
     private var claimLine: (text: String, color: Color) {
         if let claim = element.claimedBy {
-            return ("● claimed by \(viewModel.memberName(claim.who).lowercased()) · \(claim.ageLabel)", NBColor.green)
+            return ("● in use by \(viewModel.memberName(claim.who).lowercased()) · \(claim.ageLabel)", NBColor.green)
         }
         return ("○ free", NBColor.textSecondary)
     }
@@ -44,25 +42,54 @@ struct DetailView: View {
                         viewModel.toggleFavorite(element.id)
                     } label: {
                         Text(element.isFavorite ? "★" : "☆")
-                            .font(NBFont.ui(11))
+                            .font(NBFont.mono(14))
                             .foregroundStyle(element.isFavorite ? NBColor.amber : NBColor.textMuted)
+                            .frame(width: 20, height: 22)
                     }
                     .buttonStyle(.nbPlain)
+                    .help(element.isFavorite ? "unfavourite" : "favourite")
                 }
                 Text(claimLine.text)
-                    .font(NBFont.mono(9))
+                    .font(NBFont.mono(9.5))
                     .foregroundStyle(claimLine.color)
             }
 
             Spacer()
 
-            Text(element.env.rawValue)
-                .font(NBFont.mono(8.5))
-                .foregroundStyle(element.env.color)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(element.env.color.opacity(0.35), lineWidth: 1))
+            EnvironmentBadges(environments: element.sortedEnvironments, size: 9)
+
+            elementActionsMenu
         }
+    }
+
+    /// Edit and delete live here rather than as a pair of small text buttons at the bottom
+    /// of the scroll view, where they read as one two-tone control and cost a screenful of
+    /// space. Destructive action stays red and now goes through a real confirmation.
+    private var elementActionsMenu: some View {
+        Menu {
+            Button("edit") { viewModel.openEdit(element) }
+            Divider()
+            Button("delete…", role: .destructive) {
+                let hasSecrets = !group.secretFieldKeys.isEmpty
+                if ElementDialogs.confirmDelete(name: element.name, hasSecrets: hasSecrets) {
+                    viewModel.deleteElement(element.id)
+                }
+            }
+        } label: {
+            Text("⋯")
+                .font(NBFont.mono(12, weight: .bold))
+                .foregroundStyle(NBColor.textSecondaryAlt)
+                .frame(width: 24, height: 22)
+                .overlay(
+                    RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
+                        .stroke(NBColor.border, lineWidth: 1)
+                )
+        }
+        .menuStyle(.button)
+        .buttonStyle(.nbPlain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("edit or delete this element")
     }
 
     private var fieldsSection: some View {
@@ -95,15 +122,15 @@ struct DetailView: View {
     }
 
     private var claimButtonLabel: String {
-        guard let claim = element.claimedBy else { return "claim + copy" }
-        return claim.who == "you" ? "release" : "claimed by \(viewModel.memberName(claim.who))"
+        guard let claim = element.claimedBy else { return "use + copy" }
+        return viewModel.isMine(claim) ? "release" : "in use by \(viewModel.memberName(claim.who))"
     }
 
     private var claimButtonStyle: (bg: Color, fg: Color, border: Color) {
         guard let claim = element.claimedBy else {
             return (NBColor.amber, NBColor.background, NBColor.amber)
         }
-        if claim.who == "you" {
+        if viewModel.isMine(claim) {
             return (.clear, NBColor.green, NBColor.green.opacity(0.4))
         }
         return (.clear, NBColor.textSecondary, NBColor.border)
@@ -143,9 +170,9 @@ struct DetailView: View {
 
             if viewModel.loginUsername(for: element) != nil {
                 Text(viewModel.resolvedDeeplinkScheme.isEmpty
-                     ? "set a URL scheme in settings to enable deeplinks"
+                     ? "no URL scheme yet — set one from the ▾ menu next to the collection name"
                      : "fires \(viewModel.resolvedDeeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
-                    .font(NBFont.mono(8))
+                    .font(NBFont.mono(9))
                     .foregroundStyle(NBColor.textMuted)
             }
 
@@ -169,7 +196,7 @@ struct DetailView: View {
             // The escape hatch for a claim nobody can release. Without a backend the claimant
             // has no way to hand it back, so this is the only path off a locked row short of
             // deleting the element.
-            if let claim = element.claimedBy, claim.who != "you" {
+            if let claim = element.claimedBy, !viewModel.isMine(claim) {
                 Button {
                     viewModel.takeOver(element.id)
                 } label: {
@@ -186,7 +213,7 @@ struct DetailView: View {
 
             // Second entry point for notify-when-free (the row tooltip is the other) —
             // only meaningful when there are teammates who might free it.
-            if let claim = element.claimedBy, claim.who != "you", !viewModel.isSolo {
+            if let claim = element.claimedBy, !viewModel.isMine(claim), !viewModel.isSolo {
                 Button {
                     viewModel.notifyWhenFree(element)
                 } label: {
@@ -201,31 +228,6 @@ struct DetailView: View {
                 .padding(.top, 2)
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    viewModel.openEdit(element)
-                } label: {
-                    Text("edit")
-                        .font(NBFont.mono(9))
-                        .foregroundStyle(NBColor.textSecondary)
-                }
-                .buttonStyle(.nbPlain)
-                .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)
-
-                Button {
-                    if confirmingDelete {
-                        viewModel.deleteElement(element.id)
-                    } else {
-                        confirmingDelete = true
-                    }
-                } label: {
-                    Text(confirmingDelete ? "really delete?" : "delete…")
-                        .font(NBFont.mono(9))
-                        .foregroundStyle(NBColor.red.opacity(confirmingDelete ? 1 : 0.7))
-                }
-                .buttonStyle(.nbPlain)
-            }
-            .padding(.top, 8)
         }
         .padding(.top, 18)
     }
@@ -241,9 +243,9 @@ private struct MetaRow: View {
     var body: some View {
         HStack(alignment: wraps ? .top : .firstTextBaseline, spacing: 8) {
             Text(label)
-                .font(NBFont.mono(8))
+                .font(NBFont.mono(9.5, weight: .medium))
                 .foregroundStyle(NBColor.textMuted)
-                .frame(width: 66, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
             Text(value)
                 .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.textSecondaryAlt)
@@ -271,9 +273,9 @@ private struct FieldRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(label)
-                .font(NBFont.mono(8))
+                .font(NBFont.mono(9.5, weight: .medium))
                 .foregroundStyle(NBColor.textMuted)
-                .frame(width: 66, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
             Text(isSecret && !isRevealed ? "••••••••••" : value)
                 .font(NBFont.mono(10.5))
                 .foregroundStyle(NBColor.textFieldValue)

@@ -122,7 +122,7 @@ private struct WelcomeStep: View {
                 .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.textSecondaryAlt)
                 .padding(.top, 5)
-            Text("one live catalogue of test accounts and fixtures for the whole team — no more “anyone got a working login?”")
+            Text("every test account, promo code and fixture you juggle, one tap from the simulator — works alone, built to be shared")
                 .font(NBFont.ui(11.5))
                 .foregroundStyle(NBColor.textSecondary)
                 .multilineTextAlignment(.center)
@@ -156,17 +156,17 @@ private struct IdentityStep: View {
             Text("who are you?")
                 .font(NBFont.ui(15, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
-            Text("your name shows on every element you claim, so teammates know who to ping.")
+            Text("your name labels every element you mark in use — for you today, and for anyone you share your catalogue with later.")
                 .font(NBFont.ui(11))
                 .foregroundStyle(NBColor.textSecondary)
                 .lineSpacing(3)
                 .padding(.top, 4)
 
             Text("YOUR NAME")
-                .nbMonoLabel(8, tracking: 0.8)
+                .nbMonoLabel(9.5, tracking: 0.8)
                 .padding(.top, 16)
 
-            TextField("", text: $onboarding.name, prompt: Text("e.g. Nadia Benali").foregroundStyle(NBColor.textMuted))
+            TextField("", text: $onboarding.name, prompt: Text("e.g. John Doe").foregroundStyle(NBColor.textMuted))
                 .textFieldStyle(.plain)
                 .font(NBFont.ui(12))
                 .foregroundStyle(NBColor.textPrimary)
@@ -188,7 +188,7 @@ private struct IdentityStep: View {
                             .foregroundStyle(NBColor.green)
                     )
                 HStack(spacing: 0) {
-                    Text("this is how your claims appear · ").foregroundStyle(NBColor.textSecondary)
+                    Text("this is how you appear on elements you use · ").foregroundStyle(NBColor.textSecondary)
                     Text("● \(onboarding.firstNameLowercased)").foregroundStyle(NBColor.green)
                 }
                 .font(NBFont.mono(9))

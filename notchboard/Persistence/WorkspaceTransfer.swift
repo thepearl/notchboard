@@ -2,51 +2,98 @@
 //  WorkspaceTransfer.swift
 //  notchboard
 //
-//  Export/import a workspace as a portable JSON file, so a catalogue can be passed between
-//  teammates before real sync exists (vision.md §9 — this is the local stand-in for the
-//  shared backend). Secret-typed field values are stripped on export: a file that lands in
-//  Slack/email/Drive must never carry credentials in the clear (same principle as keeping
-//  them out of state.json — see AppStateStore/SecretsStore).
+//  Export/import a collection as a portable JSON file — the invitation, bootstrap and
+//  backup of vision.md §14, never the sync channel. Two rules define the format:
+//
+//  - Secrets always travel, always encrypted (§14.5.1). There is exactly one export mode:
+//    a mandatory password seals every secret value into an AES-GCM envelope, so a file in
+//    Slack/email/Drive never carries credentials in the clear and a second Mac never means
+//    retyping them. The in-band copies inside the workspace JSON are blanked on export and
+//    force-blanked again on import, whatever the file claims — real values only ever enter
+//    through the envelope, which a hand-crafted file can't forge without the password.
+//  - Claims never travel. A claim is a status light, not a document; frozen into a file it
+//    arrives stale by construction (the tom/sara/mia bug, delivered by attachment).
+//
+//  There is exactly one format version, checked exactly: pre-release, files with any other
+//  version are refused rather than tolerated (no compat code before 1.0 — vision.md §14.5).
 //
 
 import Foundation
 
 struct WorkspaceTransferFile: Codable {
+    /// A stamp for the future — version history starts at the first public release.
     static let currentVersion = 1
     var formatVersion: Int
     var workspace: NBWorkspace
+    /// Present whenever the source had secret values; nil in exports of catalogues that
+    /// hold none.
+    var secrets: SecretsEnvelope?
 
-    init(workspace: NBWorkspace) {
+    init(workspace: NBWorkspace, secrets: SecretsEnvelope? = nil) {
         self.formatVersion = Self.currentVersion
         self.workspace = workspace
+        self.secrets = secrets
     }
 }
 
 enum WorkspaceTransfer {
-    enum ImportError: Error {
+    enum ImportError: Error, Equatable {
         case unreadable
         case emptyWorkspace
+        case unsupportedVersion(Int)
+        case wrongPassword
     }
 
-    /// Encodes the workspace to shareable JSON with every secret-typed value blanked. The
-    /// recipient imports the catalogue's shape and non-secret data, then re-enters secrets
-    /// locally (they go to their own Keychain).
-    static func exportData(_ workspace: NBWorkspace) throws -> Data {
-        let stripped = workspace.mappingSecretValues { _, _, _ in "" }
+    /// Encodes the workspace for sharing, sealing every secret value under `password`.
+    /// `rounds` exists for tests — the deliberate slowness of the real KDF cost would
+    /// otherwise dominate the suite.
+    static func exportData(_ workspace: NBWorkspace, password: String, rounds: Int = TransferCrypto.defaultRounds) throws -> Data {
+        var secretValues: [String: String] = [:]
+        let stripped = workspace.clearingClaims().mappingSecretValues { elementID, fieldKey, value in
+            if !value.isEmpty { secretValues["\(elementID).\(fieldKey)"] = value }
+            return ""
+        }
+        var file = WorkspaceTransferFile(workspace: stripped)
+        if !secretValues.isEmpty {
+            file.secrets = try TransferCrypto.seal(secretValues, password: password, rounds: rounds)
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(WorkspaceTransferFile(workspace: stripped))
+        return try encoder.encode(file)
     }
 
-    /// Decodes a workspace export. `groupOrder` is reconciled with `groups` the same way
-    /// `NotchboardViewModel.restore` does, so an imported file can't strand the UI.
-    static func importWorkspace(from data: Data) throws -> NBWorkspace {
-        guard let file = try? JSONDecoder().decode(WorkspaceTransferFile.self, from: data) else {
+    /// First import stage: parse, verify the version, and sanitise. The returned file's
+    /// workspace is already safe to adopt — claims stripped, group order reconciled, and
+    /// every in-band secret value force-blanked regardless of what the file contained.
+    static func readFile(from data: Data) throws -> WorkspaceTransferFile {
+        guard var file = try? JSONDecoder().decode(WorkspaceTransferFile.self, from: data) else {
             throw ImportError.unreadable
         }
-        var workspace = file.workspace
-        guard !workspace.groups.isEmpty else { throw ImportError.emptyWorkspace }
-        workspace.reconcileGroupOrder()
-        return workspace
+        guard file.formatVersion == WorkspaceTransferFile.currentVersion else {
+            throw ImportError.unsupportedVersion(file.formatVersion)
+        }
+        guard !file.workspace.groups.isEmpty else { throw ImportError.emptyWorkspace }
+        file.workspace = file.workspace.clearingClaims().mappingSecretValues { _, _, _ in "" }
+        file.workspace.reconcileGroupOrder()
+        return file
+    }
+
+    /// Second import stage: open the envelope and inject its values. Only keys matching an
+    /// actual secret-typed field land (the traversal is schema-driven), so the envelope
+    /// can't smuggle values into non-secret fields either. A file without an envelope
+    /// passes through unchanged — that's the secretless-export path and the skip path.
+    static func unlockingSecrets(of file: WorkspaceTransferFile, password: String) throws -> NBWorkspace {
+        guard let envelope = file.secrets else { return file.workspace }
+        let values: [String: String]
+        do {
+            values = try TransferCrypto.open(envelope, password: password)
+        } catch TransferCrypto.CryptoError.wrongPassword {
+            throw ImportError.wrongPassword
+        } catch {
+            throw ImportError.unreadable
+        }
+        return file.workspace.mappingSecretValues { elementID, fieldKey, _ in
+            values["\(elementID).\(fieldKey)"] ?? ""
+        }
     }
 }

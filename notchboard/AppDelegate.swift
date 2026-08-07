@@ -93,8 +93,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // documented reset path) used to orphan every secret of the old workspace forever.
         // Skipped while a corrupt-state backup exists: the user may restore it, and its
         // elements' secrets must survive until then.
+        //
+        // The keeping-set MUST span every collection, not just the active one — passing the
+        // active workspace's keys here would delete all other collections' secrets on
+        // launch. This was the plan's named landmine; PersistenceLandmineTests guards it.
         if !AppStateStore.corruptBackupExists {
-            SecretsStore.pruneOrphans(keeping: Set(viewModel.workspace.allSecretKeychainKeys))
+            SecretsStore.pruneOrphans(keeping: Set(viewModel.collections.allSecretKeychainKeys))
         }
 
         setUpPanel()
@@ -116,6 +120,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // every launch. makeKey afterwards so onboarding's name field can take focus.
         updatePanelFrame()
         panel.makeKey()
+
+        // Files that launched the app (double-clicked .notchboard) queued while the view
+        // models didn't exist yet — import them now.
+        if !pendingOpenURLs.isEmpty {
+            let urls = pendingOpenURLs
+            pendingOpenURLs = []
+            importCollections(from: urls)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -194,8 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fallbackMenuItem = fallbackItem
         menu.addItem(makeItem("Replay Onboarding…", #selector(replayOnboardingFromMenu), key: ""))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Export Workspace…", #selector(exportWorkspaceFromMenu), key: ""))
-        menu.addItem(makeItem("Import Workspace…", #selector(importWorkspaceFromMenu), key: ""))
+        menu.addItem(makeItem("Export Collection…", #selector(exportCollectionFromMenu), key: ""))
+        menu.addItem(makeItem("Import Collections…", #selector(importCollectionsFromMenu), key: ""))
+        menu.addItem(makeItem("Restore Snapshot…", #selector(restoreSnapshotFromMenu), key: ""))
         menu.addItem(.separator())
         menu.addItem(makeItem("Settings…", #selector(openSettingsFromMenu), key: ","))
         menu.addItem(.separator())
@@ -238,44 +251,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    @objc private func exportWorkspaceFromMenu() {
-        let data: Data
+    @objc private func exportCollectionFromMenu() {
+        guard let url = WorkspaceFileDialogs.chooseExportDestination(defaultName: viewModel.workspace.name) else { return }
+        // Password after destination: cancelling the password prompt costs nothing, whereas
+        // deriving a key before knowing whether the user even picks a file would waste the
+        // (deliberately slow) PBKDF2 work.
+        guard let password = WorkspaceExportFlow.promptForPassword(collectionName: viewModel.workspace.name) else { return }
         do {
-            data = try WorkspaceTransfer.exportData(viewModel.workspace)
-        } catch {
-            viewModel.toast("export failed — \(error.localizedDescription)", color: .red)
-            return
-        }
-
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "\(viewModel.workspace.name).notchboard.json"
-        panel.title = "Export Workspace"
-        NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
+            let data = try WorkspaceTransfer.exportData(viewModel.workspace, password: password)
             try data.write(to: url, options: .atomic)
-            viewModel.toast("workspace exported (secrets not included)", color: .green)
+            viewModel.toast("exported “\(viewModel.workspace.name)” — secrets encrypted", color: .green)
         } catch {
             viewModel.toast("export failed — \(error.localizedDescription)", color: .red)
         }
     }
 
-    @objc private func importWorkspaceFromMenu() {
+    /// Imports one collection per chosen file, each added *alongside* the existing ones —
+    /// import destroys nothing (vision.md §14, plan Phase 2).
+    @objc private func importCollectionsFromMenu() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.notchboardCollection, .json]
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.title = "Import Workspace"
+        panel.title = "Import Collections"
         NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let data = try Data(contentsOf: url)
-            let workspace = try WorkspaceTransfer.importWorkspace(from: data)
-            viewModel.replaceWorkspace(with: workspace)
-        } catch {
-            viewModel.toast("import failed — not a valid workspace file", color: .red)
+        guard panel.runModal() == .OK else { return }
+        importCollections(from: panel.urls)
+    }
+
+    /// Shared by the menu path and the double-click open path.
+    private func importCollections(from urls: [URL]) {
+        for url in urls {
+            do {
+                guard let workspace = try WorkspaceImportFlow.importInteractively(from: url) else { continue }
+                viewModel.addCollection(workspace)
+            } catch {
+                viewModel.toast(WorkspaceImportFlow.userMessage(for: error), color: .red)
+            }
         }
+    }
+
+    @objc private func restoreSnapshotFromMenu() {
+        SnapshotRestoreFlow.run(viewModel: viewModel)
+    }
+
+    /// Files opened from Finder (double-click, drag onto the icon, "Open With") arrive
+    /// here via the CFBundleDocumentTypes declaration in Info.plist. On a launch-by-
+    /// document they can arrive *before* applicationDidFinishLaunching has built the view
+    /// models, so they queue rather than being dropped.
+    private var pendingOpenURLs: [URL] = []
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard viewModel != nil else {
+            pendingOpenURLs.append(contentsOf: urls)
+            return
+        }
+        importCollections(from: urls)
     }
 
     @objc private func openSettingsFromMenu() {

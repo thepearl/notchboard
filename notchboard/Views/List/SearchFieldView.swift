@@ -19,7 +19,7 @@ struct SearchFieldView: View {
                 "",
                 text: $viewModel.searchText,
                 // Show the chord the user actually configured, not a hardcoded ⌘K.
-                prompt: Text("search name, tag, note…  \(viewModel.hotKeyModifier.symbolPrefix) K")
+                prompt: Text("search name, tag, note…  \(viewModel.hotKeyModifier.symbolPrefix)K")
                     .foregroundStyle(NBColor.textMuted)
             )
                 .textFieldStyle(.plain)

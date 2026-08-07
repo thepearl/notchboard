@@ -60,7 +60,7 @@ struct LoginOnSimTests {
 
         vm.loginOnSim(element)
         completion?(nil)
-        #expect(vm.selectedElement(id: element.id)?.claimedBy?.who == "you")
+        #expect(vm.selectedElement(id: element.id)?.claimedBy?.who == vm.selfMemberID)
     }
 
     @Test("Auto-claim survives a group switch during the simctl round-trip")
@@ -85,7 +85,33 @@ struct LoginOnSimTests {
         completion?(nil)
 
         let claimed = vm.workspace.groups[owningGroupID]?.elements.first { $0.id == element.id }?.claimedBy
-        #expect(claimed?.who == "you", "the claim must land in the element's owning group")
+        #expect(claimed?.who == vm.selfMemberID, "the claim must land in the element's owning group")
+    }
+
+    @Test("Auto-claim survives a collection switch during the simctl round-trip")
+    func claimSurvivesCollectionSwitch() {
+        // Phase 2 sibling of the group-switch guard: the owning *collection* is captured at
+        // fire time too, or the callback would mutate whatever catalogue is active by then.
+        let vm = NotchboardViewModel()
+        vm.deeplinkScheme = "testapp"
+        guard let element = authElement(in: vm) else {
+            Issue.record("seed data has no free auth element")
+            return
+        }
+        let owningCollectionID = vm.activeCollectionID
+
+        var completion: ((SimctlBridge.Failure?) -> Void)?
+        vm.deeplinkOpener = { _, done in completion = done }
+
+        vm.loginOnSim(element)
+        vm.createCollection(named: "elsewhere") // user switches collections while simctl runs
+        completion?(nil)
+
+        let claimed = vm.collections.first { $0.id == owningCollectionID }?
+            .workspace.groups.values.flatMap(\.elements)
+            .first { $0.id == element.id }?.claimedBy
+        #expect(claimed?.who == vm.selfMemberID, "the claim must land in the element's owning collection")
+        #expect(vm.workspace.elementCount == 0, "the active (new) collection must stay untouched")
     }
 
     @Test("Failed deeplink leaves the element unclaimed")

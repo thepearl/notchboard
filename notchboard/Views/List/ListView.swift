@@ -69,7 +69,7 @@ private struct ListFooterView: View {
         HStack {
             // No fake "sync Ns ago" freshness — there is no sync in this local build.
             HStack(spacing: 0) {
-                Text("\(viewModel.claimedCount) claimed").foregroundStyle(NBColor.green)
+                Text("\(viewModel.claimedCount) in use").foregroundStyle(NBColor.green)
                 Text(" · local").foregroundStyle(NBColor.textSecondary)
             }
             .font(NBFont.mono(9.5))

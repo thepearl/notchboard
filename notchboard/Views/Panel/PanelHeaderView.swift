@@ -6,8 +6,7 @@
 import SwiftUI
 
 struct PanelHeaderView: View {
-    let workspaceName: String
-    let memberCount: Int
+    @Bindable var viewModel: NotchboardViewModel
     let onCollapse: () -> Void
 
     @State private var collapseHovering = false
@@ -23,17 +22,13 @@ struct PanelHeaderView: View {
                 .foregroundStyle(NBColor.textPrimary)
                 .tracking(-0.2)
 
-            Text("/ \(workspaceName)")
-                .font(NBFont.mono(9.5))
-                .foregroundStyle(NBColor.textSecondary)
+            collectionSwitcher
 
             Spacer()
 
-            // Member count, not "online" — presence doesn't exist without a backend, and
-            // the header shouldn't pretend it does.
-            Text("\(memberCount) members")
-                .font(NBFont.mono(9))
-                .foregroundStyle(NBColor.textSecondary)
+            // No member count here: the app is solo until sync exists (vision.md §14), and
+            // "1 members" was a team costume on a single-user tool. Its width now hosts
+            // the collection switcher.
 
             Button(action: onCollapse) {
                 Text("«")
@@ -60,9 +55,81 @@ struct PanelHeaderView: View {
                 }
         )
     }
+
+    /// The Phase 2 collection switcher (vision.md §14): the workspace name became a menu.
+    /// System Menu chrome is fine here — it renders as our styled label until opened, and a
+    /// native menu beats rebuilding popover behaviour by hand for four actions.
+    private var collectionSwitcher: some View {
+        Menu {
+            ForEach(viewModel.collections) { collection in
+                Button {
+                    viewModel.switchCollection(collection.id)
+                } label: {
+                    if collection.id == viewModel.activeCollectionID {
+                        Label(collection.name, systemImage: "checkmark")
+                    } else {
+                        Text(collection.name)
+                    }
+                }
+            }
+            Divider()
+            Button("new collection…") {
+                if let name = CollectionDialogs.promptForName(
+                    title: "New collection",
+                    message: "A collection is one catalogue with its own groups and deeplink scheme."
+                ) {
+                    viewModel.createCollection(named: name)
+                }
+            }
+            Button("rename…") {
+                if let name = CollectionDialogs.promptForName(
+                    title: "Rename collection",
+                    message: "Renames “\(viewModel.workspace.name)”.",
+                    initial: viewModel.workspace.name
+                ) {
+                    viewModel.renameActiveCollection(to: name)
+                }
+            }
+            Button("duplicate") {
+                viewModel.duplicateActiveCollection()
+            }
+            Divider()
+            // The deeplink scheme is per collection, and Settings was too far from where
+            // people actually notice it's missing (the detail view's login button).
+            Button(viewModel.deeplinkScheme.isEmpty
+                   ? "set deeplink scheme…"
+                   : "deeplink scheme: \(viewModel.resolvedDeeplinkScheme)://…") {
+                if let scheme = CollectionDialogs.promptForScheme(
+                    collectionName: viewModel.workspace.name,
+                    current: viewModel.deeplinkScheme
+                ) {
+                    viewModel.setDeeplinkScheme(scheme)
+                }
+            }
+            Divider()
+            Button("delete…") {
+                if CollectionDialogs.confirmDelete(
+                    name: viewModel.workspace.name,
+                    elementCount: viewModel.workspace.elementCount
+                ) {
+                    viewModel.deleteActiveCollection()
+                }
+            }
+            .disabled(viewModel.collections.count == 1)
+        } label: {
+            Text("/ \(viewModel.workspace.name) ▾")
+                .font(NBFont.mono(9.5))
+                .foregroundStyle(NBColor.textSecondary)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.nbPlain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("switch or manage collections")
+    }
 }
 
 #Preview {
-    PanelHeaderView(workspaceName: "acme-mobile", memberCount: 4, onCollapse: {})
+    PanelHeaderView(viewModel: NotchboardViewModel(), onCollapse: {})
         .background(NBColor.panel)
 }

@@ -115,7 +115,7 @@ The prototype simulates teammates claiming/releasing elements on a timer (Sara r
 9s, Mia claims one at 17s, etc.), each surfaced as a toast. This is stand-in for what must be a
 **real shared backend** in production — Notchboard's core value (*one live catalogue for the whole
 team*) only exists if state genuinely syncs across machines in near-real-time, not just within one
-session.
+session. *(Direction decided 2026-08-07: that sync arrives with no bespoke backend at all — see §14.)*
 
 ### 5.7 Toasts & shortcuts
 - Bottom-right toast stack (copy confirmations, claim/release events, validation errors, deeplink
@@ -198,6 +198,8 @@ no real Accessibility API, and no real Simulator control. Building it natively m
    local-only. Needs a lightweight real-time backend (workspace/group/element/claim CRUD + a realtime
    channel for presence and claim state) — e.g. Supabase (Postgres + Realtime + Auth) or Firebase, or
    a small custom WebSocket service, chosen based on team's existing infra preferences.
+   **Superseded 2026-08-07:** no backend — sync rides MQTT retained messages on any standard
+   broker; see §14.
 4. **Deeplink bridge (phase 3)**: shell out to `xcrun simctl openurl booted "<url>"`; requires a
    documented convention the target app must adopt for a debug URL scheme, and Simulator must be
    booted — needs clear failure states (no booted simulator, target app not installed, scheme not
@@ -229,8 +231,11 @@ no real Accessibility API, and no real Simulator control. Building it natively m
 
 1. **Sync backend choice** — Supabase vs. Firebase vs. custom service; drives auth (invite codes →
    real workspace auth), realtime claim broadcast, and secret storage approach.
+   **Resolved 2026-08-07:** none of the above — no backend; sync rides any standard MQTT broker (§14).
 2. **Auth model** — is "your name" (onboarding step 2) the whole identity, or does it need to map to
    a real account (email/SSO) for security and to prevent claim spoofing?
+   **Resolved 2026-08-07:** in the core, a stable generated member id plus the onboarding display
+   name, with the room password gating entry; real accounts/SSO are paid-tier triggers (§14.6).
 3. **Multi-app support** — prototype hardcodes one fictional app's deeplink scheme
    (`brewly://debug/login`); real product needs a per-workspace configurable scheme + a documented
    integration contract for teams to adopt in their own app's debug builds.
@@ -238,8 +243,12 @@ no real Accessibility API, and no real Simulator control. Building it natively m
    deny Accessibility access or don't want docking.
 5. **Conflict resolution** — what happens when two people edit the same group schema concurrently,
    or claim the same element in the same instant (race condition in "claim + copy")?
+   **Resolved 2026-08-07:** last-write-wins per element/schema with timestamps and tombstones;
+   claim races resolve by broker message ordering and presence (§14.2).
 6. **Distribution** — App Store (like RocketSim) vs. direct download; affects sandboxing constraints
    on the Accessibility API and `simctl` shell-out.
+   **Resolved 2026-08-07:** direct notarised download, never the App Store (sandbox-off is
+   structural, §13.3), and the core goes open source (§14.1).
 
 ## 12. Suggested build order
 
@@ -517,3 +526,306 @@ Two things this surfaced that no amount of local reasoning would have:
   success path and that an unregistered scheme reports failure rather than silent success. It
   skips itself when no simulator is booted, and it has a timeout that fails loudly if the
   completion never arrives — which is exactly the hang the stderr-drain fix in §13.1 removed.
+
+### 13.7 Sync and distribution direction decided (2026-08-07)
+
+The backend question is settled — by removing the backend. §14 below is the constitution:
+local-first, sync over MQTT retained messages on any standard broker, secrets end-to-end
+encrypted under password-derived keys, an open source core, and a bespoke (paid) backend only
+if the trigger list in §14.6 fires. Nothing in §14 was code at decision time; §13.8 records
+the same-day implementation of every local milestone (collections, identity, encrypted
+exports, snapshots, passphrase generator, file association). The MQTT room itself still
+waits for a second user, per §14's own sequencing. Persona 3 (self-host) caveat resolutions
+are deliberately parked; they are recorded in §14.4 and get decided another day.
+
+### 13.8 The local milestones of §14, implemented (2026-08-07)
+
+Everything §14 requires short of the room itself landed the same day the constitution was
+written, in one pass (33 files, +2255/−198, tests 89 → 129):
+
+- **Multiple collections.** `NBCollection` wraps `NBWorkspace` with a local-only id and a
+  per-collection deeplink scheme; the view model holds `collections` +
+  `activeCollectionID` behind a computed `workspace` facade, which let all three dozen
+  call sites survive unchanged. Header switcher menu (switch/new/rename/duplicate/delete),
+  import *adds* a collection, element-id uniqueness spans collections (Keychain account
+  keys carry no collection component), and the launch orphan sweep keeps keys from **all**
+  collections — the plan's named landmine, now guarded by a test.
+- **Persistence in the collections shape.** `collections` + `activeCollectionID` +
+  `memberID`, strict on the catalogue and lenient on settings. (A same-day migration path
+  and downgrade shadow were built, verified live, and then removed again under the
+  no-compat decision — see the amendment at the end of this section and §14.5.)
+- **Identity (§14.2's prerequisite).** A persisted `memberID` that claims are attributed
+  to, with the onboarding name finally labelling the user's in-use marks. The auto-release
+  sweep now reaches background collections, and the deeplink auto-claim captures its
+  owning collection so a mid-flight switch can't misroute it.
+- **Encrypted exports (§14.5.1).** One export mode: a mandatory password (passphrase
+  generator one click away, §14.5.3) seals all secret values into an AES-GCM envelope via
+  PBKDF2 → HKDF (all platform primitives). Claims are stripped — a claim frozen into a
+  file arrives stale by construction. Import prompts for the password with retry and an
+  import-without-secrets skip path; in-band secret values are force-blanked whatever a
+  file claims; a crafted envelope demanding an absurd KDF cost is refused. This retires
+  the solo two-Macs caveat.
+- **Snapshots (§14.5.2).** Periodic encrypted snapshots of all collections in
+  `~/.notchboard/snapshots/`, sealed under a device-local Keychain key held in its own
+  service (out of the orphan sweep's reach), bounded rotation, menu-bar restore that
+  first snapshots the current state so a mis-restore is itself reversible. Verified
+  ciphertext-only on disk.
+- **File association.** `.notchboard` is the extension — deliberately single-dot, since
+  LaunchServices resolves multi-dot extensions by their last component and could never
+  associate a ".something.json" spelling — declared via a root-level partial Info.plist
+  merged into the generated one, the same trick NotchDemo needed for the same reason.
+  `open file.notchboard` was verified routing into the running app, importing as a new
+  collection.
+
+Runtime verification (headless): two files imported as collections two and three with ids
+kept unique, the snapshot appeared encrypted, relaunch produced no corrupt backup, and the
+live state was then restored byte-for-byte. (The migration was also verified live before
+its same-day removal.) Not visually exercised: the password prompts, the switcher menu,
+and snapshot restore — flagged in CLAUDE.md's known issues for the next dogfooding session.
+
+### 13.9 First hands-on pass, and what it changed (2026-08-07)
+
+Ghazi ran the hands-on list against the build. Onboarding, the collection switcher and
+identity all checked out. Two things blocked the rest, and both were real:
+
+- **The export password was invisible.** The prompt's accessory view used an `NSStackView`,
+  which lays out with Auto Layout, so the empty `NSTextField` collapsed to its (near-zero)
+  intrinsic width beside the Generate button. Rebuilt with a plain container and fixed
+  frames; `PromptAccessoryTests` now forces layout and asserts the field survives it.
+- **The per-collection deeplink scheme was unfindable.** It only existed in the Settings
+  window, which is nowhere near the moment you notice it's missing. It is now an item in
+  the collection ▾ menu showing the current scheme, validated on entry (a pasted universal
+  link is refused rather than stored), with the detail-view hint pointing at it.
+
+The same pass produced six UI changes, all from real use:
+
+- **Legibility.** The grey scale was too dark to read — `textSecondary` and `textMuted` sat
+  near 2.5:1 against the panel. Every step was lifted past 4.5:1 and the default mono label
+  went 8pt → 9.5pt. The favourite star grew from 10pt to 13.5pt with a real hit area.
+- **Detail actions.** The bottom "edit / delete…" pair read as one two-tone control and ate
+  a screenful. They are now a ⋯ menu beside the environment badges, with delete confirmed
+  by a proper dialog instead of a two-step inline button.
+- **Multi-environment elements.** `NBElement.env` became `environments: Set<NBEnvironment>`:
+  the same account normally exists in dev *and* staging, and a single value forced
+  duplicate rows. Filtering matches any member of the set, and rows/detail render every
+  badge.
+- **A speed bump on production.** Selecting PRD alongside another environment raises a
+  warning explaining how a prod credential reaches a debug build, with "I understand" and a
+  native suppression checkbox whose answer is persisted.
+- **Field types mean something.** `bool` is a two-state selector, `picker` is a real menu
+  driven by new `NBField.options` (edited in the group designer), `number` filters
+  non-numeric input as you type, and `url`/`date` are validated on save with a locale-
+  independent format. `NBFieldValidation` is the gate, because imports and hand-edited
+  files bypass any control.
+
+Note for anyone reading the log later: this pass changed `NBElement` and `NBField`, so
+every `state.json` and export written before it resets — the no-compat rule (§14.5) working
+as designed rather than a defect.
+
+**Retested the same day, all green.** From a wiped state (no `state.json`, no snapshots)
+Ghazi walked the full list: onboarding and its three starting points, adding real elements,
+the collection switcher (create/rename/duplicate/delete), the per-collection deeplink
+scheme, encrypted export with the generated passphrase, import with the right password /
+a wrong one / the skip path, snapshot restore, and "login on sim" against NotchDemo.
+Nothing outstanding. This is the first time every shipped feature has been exercised by
+hand rather than only by tests.
+
+**Export format inspected, not just trusted.** He renamed a `.notchboard` file to `.txt`
+and read it. What the plaintext showed, and why each part is right:
+
+- `"password": ""` — the secret-typed value was pulled out and sealed; no credential is in
+  the clear anywhere in the file.
+- no `claimedBy` key — claims are stripped on export, as §14.5 requires.
+- `secrets` carrying a 16-byte random salt, 600 000 PBKDF2-HMAC-SHA256 rounds and an
+  AES-GCM combined box — so a tampered file fails closed and a wrong password fails
+  cleanly rather than decrypting into plausible garbage.
+- everything else readable: usernames, element names, notes, the schema, environments,
+  collection name, and the claimant's display name inside `lastUsed`.
+
+That last line is the accepted trade-off, and it settles §14.7's "encrypt all payloads?"
+question **for now**: the split stays as it is, because being able to open a collection
+file and see what's in it is worth real debuggability — and it is the same property the
+future MQTT room design leans on. Two things change the answer: a catalogue holding a real
+client's identifiers rather than test accounts, or the first complaint from a security
+review. Until then the lever available without any code change is per-field: mark a field
+`secret` in the group designer and it moves into the envelope. Documented so nobody
+re-derives it: the file is exactly as strong as the export password, which is what the
+Generate button exists to make easy.
+
+**Amended the same day (two remarks from Ghazi):**
+
+1. *No compatibility code before first release* (now §14.5 decision 5). The v1→collections
+   migration, the downgrade shadow, `NBClaim`'s pre-`claimedAt` decoding, the literal-"you"
+   claim tolerance and rebinding, the newer-schema `state.json.v(N)` backup, and the
+   `.notchboard.json` filename tag were all removed again hours after landing. Version
+   stamps reset to 1 and are checked exactly on imports. A pre-collections `state.json`
+   now takes the corrupt-backup reset path — by design, since the only user is its author.
+2. *"claim" left the UI* (now §14.5 decision 6). Every user-facing string — detail status
+   line, buttons, list footer, row tooltip, settings, onboarding preview, the
+   notify-when-free notification body — now says "in use"/"use", found by an exhaustive
+   sweep and pinned by the copy in place. Internal identifiers keep their names.
+
+## 14. Distribution and sync: the constitution (decided 2026-08-07)
+
+Binding product direction for how Notchboard reaches people and how state moves between
+machines. Decided in the 2026-08-07 brainstorm; resolves open questions §11.1, §11.2, §11.5
+and §11.6, and supersedes §9.3's assumption that live sync needs a bespoke backend. §13 logs
+what is real — as of the decision date, none of this is built.
+
+### 14.1 Principles
+
+1. **Local-first, always.** Everything works offline on one Mac, with no account and no
+   network. Sync is an upgrade, never a prerequisite.
+2. **One code path, three personas.** Solo is the app with the room field empty; a team
+   without infra and a self-hosting team differ by one URL. Any feature that would make the
+   personas diverge (accounts, server-side state) belongs behind the trigger list (§14.6),
+   not in the core.
+3. **No backend, deliberately.** Sync rides MQTT retained messages on any standard broker — a
+   managed free tier or the team's own container. There is no Notchboard server: nothing of
+   ours to deploy, update, back up or breach, and the app cannot even tell which broker it is
+   talking to.
+4. **Secrets are end-to-end encrypted wherever they travel.** In a room: ciphertext under a
+   key derived from the room password. In an export: ciphertext under a mandatory export
+   password. At rest: the Keychain, as today. Plaintext secrets never leave a Mac.
+5. **The file is the invitation, bootstrap and backup — never the sync channel.** Catalogue
+   changes propagate live through the room; the `.notchboard` file gets you in, moves
+   catalogues between machines, and gets you back up after a disaster.
+6. **The broker is a rendezvous, not a source of truth.** Every member's Mac holds the full
+   catalogue; any member reseeds an empty broker on connect. Losing the broker loses nothing.
+7. **Open source core, MIT-leaning** (validate the licence choice with an adviser before
+   publishing). The repo is the landing page — README and demo gif are launch features — and
+   an app that takes the Accessibility permission and holds credentials needs source
+   visibility to be trusted at all.
+
+### 14.2 Sync design sketch
+
+One room per collection. Topics, all retained:
+
+```
+nb/<room>/schema/<groupID>            group name, field schema, ordering
+nb/<room>/el/<groupID>/<elementID>    element payload; secret values as ciphertext
+nb/<room>/claim/<elementID>           {memberID, name, at}; empty payload = free
+nb/<room>/presence/<memberID>         "online"; Last Will flips it on disconnect
+```
+
+- Late joiners receive the entire current state from retained replay — no history protocol.
+- Claims held by offline members render as free: the live twin of `releaseOrphanedClaims`.
+- Deletions publish tombstones, so a Mac that was offline can tell "deleted" from "never saw it".
+- Conflicts are last-write-wins per element with timestamps. Simultaneous edits of the same
+  element are the accepted rare loss; `automerge-swift` is the escalation path if that ever
+  hurts in practice.
+- Crypto: room password → PBKDF2 (stretch) → HKDF (derive) → AES-GCM (seal), all platform
+  primitives (CommonCrypto/CryptoKit). The broker relays bytes it cannot read.
+- TLS on 8883 is mandatory; MQTT-over-WebSocket on 443 is the corp-firewall fallback.
+- Payloads carry a schema version and unknown keys are ignored — two app versions must coexist
+  in one room.
+- Connection failures surface loudly in the panel, never as silent staleness.
+- Identity prerequisite: a stable generated member id plus the onboarding display name as the
+  claim label. Lands with the collections Phase 2 regardless of sync.
+
+Precedents, not novelty: Home Assistant's MQTT discovery (a device catalogue as retained
+config messages), Zigbee2MQTT availability topics, OwnTracks (human presence over MQTT, with
+a production iOS client).
+
+### 14.3 The three personas (docs-level walkthroughs)
+
+**Solo dev — two minutes, nothing hosted.** Download, open, onboard: name, Accessibility,
+starting point (sample / empty / import). The panel docks to the Simulator; ⌃K searches, ⌃N
+adds; groups and field schemas are user-defined; secret fields live in the Keychain. Set the
+app's URL scheme and "login on sim" signs the Simulator in with one tap, with copy-and-claim
+as the SSO/WebView fallback. Claims are personal "in use" markers. Export any time: the file
+always includes secrets, encrypted under a password chosen at export (generate button
+offered), so a second Mac is import-plus-password, not retyping every credential.
+
+**Team without infra — fifteen minutes once, two minutes per teammate.** One person creates a
+free instance on a managed MQTT tier (guide provided), creates one shared username/password,
+and pastes broker address plus credentials into collection settings; the dot turns green.
+They export the collection and post the file in Slack — the file carries the room address,
+never the room password, which is shared like a wifi password. Teammates import the file
+during onboarding, get the "join as <name>?" prompt, and type the room password once (the
+Keychain keeps it). Catalogue, schema changes, claims and presence propagate live within
+about a second. A closed lid frees that member's claims within a minute or two.
+Notify-when-free notifies for real.
+
+**Team with infra — same product, different URL.** Ops runs the shipped compose file
+(mosquitto, TLS, password file) on any VM the team can reach; the room address becomes
+`mqtts://mqtt.internal.company.com:8883`. Everything else is byte-for-byte persona 2. The
+data plane stays on their infrastructure, payload secrets are E2EE on top, and the vendor
+operates nothing. Broker migration is repointing one URL; any member reseeds.
+
+### 14.4 Caveat register
+
+**Everyone.** Never on the Mac App Store (sandbox-off is structural, §13.3), and MDM-managed
+corporate Macs may need an IT exception for the Accessibility grant. One-tap login is
+Simulator-only via `simctl`, the target app must adopt the ten-line handler, and physical
+devices fall back to copy/paste. The documented `simctl` argv exposure (§13.2) stands.
+
+**Solo.** The two-Macs problem is resolved 2026-08-07 by encrypted-always exports (§14.5.1).
+Backup remains the user's job, now mitigated by local snapshots (§14.5.2). Part of the
+product (live claims, presence) stays invisible until a second person exists.
+
+**Team without infra.** Revocation is blunt: rotating the room password is the only way to
+remove someone, and it cannot claw back what they already synced. Everyone can edit and
+delete everything, names are self-asserted, and there is no history — mitigated by snapshots
+(§14.5.2) and a future soft-delete trash, accepted otherwise. LWW can silently drop one side
+of a simultaneous same-element edit. The broker operator sees metadata (IPs, display names,
+opaque ids, traffic patterns) even though secrets are ciphertext — the encrypt-all-payloads
+dial is an open question (§14.7). Free tiers cap connections and promise nothing about
+retained durability; reseed covers loss. Presence is a heuristic: flaky wifi can flicker a
+claim free, and a crashed Mac holds its claims for a minute or two. A weak room password
+weakens the crypto — mitigated by the passphrase generator (§14.5.3).
+
+**Team with infra.** Recorded, resolutions deliberately parked (decision, 2026-08-07):
+owning uptime (certs, updates, persistence disk, monitoring, quiet failure modes),
+reachability architecture (VPN-bound vs public), broker-hardening foot-guns, residency not
+being governance (security teams will still ask for SSO/RBAC/audit — that is §14.6), and
+version-skew coordination. Revisit before any self-hosting pilot.
+
+### 14.5 Decisions (2026-08-07)
+
+1. **Exports always include secrets, encrypted.** Exporting requires a password (generate
+   button offered); secret values ship as ciphertext in a versioned envelope with the KDF
+   salt/params. Import prompts for the password; a skip path imports the catalogue with
+   secrets blank. The export/import *blanking* paths are deleted — `mappingSecretValues`
+   itself survives, because the persistence placeholder swap and the snapshot writer use
+   the same traversal. This retires the solo two-Macs caveat and supersedes the Phase-3
+   "include secrets" checkbox plan. *(Amended same day by decision 5: no tolerance for
+   older export formats — the version is checked exactly.)*
+2. **Periodic local snapshots at `~/.notchboard/snapshots/`** (dot-folder in `$HOME`, the
+   dev-tool idiom, like `~/.claude`). Export-format files sealed under a device-local random
+   key held in the Keychain, so automatic writes need no password prompt and the folder is
+   safe inside any backup. Written periodically and debounced after significant mutations,
+   with bounded rotation. This is recovery from sync accidents and mass deletes on *this*
+   Mac; cross-machine recovery remains the job of exports, because the device key does not
+   travel. Needs an in-app restore flow.
+3. **Passphrase generator** on every password field — export now, room create/join when
+   rooms land — so "generate" is always one click closer than a weak password.
+4. **Persona 3 caveat resolutions parked** — listed in §14.4, decided later.
+5. **No compatibility code before first release** (2026-08-07, second decision of the
+   day). The app is unpublished with exactly one user, so every migration shim, downgrade
+   shadow or legacy-tolerant decode is dead code by definition. Schema and format changes
+   reset (state.json's corrupt-backup path) or refuse (exact format-version match on
+   imports), never migrate. Version stamps stay in the files, checked but never migrated,
+   so real version history can begin at 1.0.
+6. **"claim" never appears in user-facing copy.** The UI presents the concept as use:
+   "in use by tom", "use + copy", "in use · 12 min ago". Internal identifiers
+   (`claimedBy`, `claimOrRelease`, …) keep their names; only labels, toasts, tooltips,
+   notifications and settings copy follow the rule.
+
+### 14.6 The backend trigger list (equals the paid tier)
+
+SSO/SCIM, per-user permissions and roles, audit history, removing a leaver without rotating
+the room password, one-click hosted rooms, org-wide administration. When two or three real
+teams ask for these, that is the signal to build the backend — and the MQTT message schema
+is already its API spec. Until then, no server.
+
+### 14.7 Open questions
+
+- Unify the room password and the export password into one per-collection passphrase, or
+  keep them separate? (Separate is simpler to reason about; unified is less to share.)
+- ~~Should *all* payloads be encrypted, not just secret fields?~~ **Reviewed 2026-08-07
+  against a real export file (§13.9): the split stays. Revisit when a catalogue holds a
+  real client's identifiers, or when a security review asks.**
+- Snapshot cadence and retention numbers.
+- Is the WebSocket-443 transport a fallback or the default?
+- Passphrase format (word-list vs random characters).

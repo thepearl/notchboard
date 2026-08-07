@@ -16,6 +16,20 @@ enum NBEnvironment: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
+    /// The environments an element can actually live in. `.all` is a filter sentinel, not
+    /// a place — it must never end up in `NBElement.environments`.
+    static let assignable: [NBEnvironment] = [.dev, .stg, .prd]
+
+    /// Display order, so a multi-environment element always reads "DEV STG PRD".
+    var sortOrder: Int {
+        switch self {
+        case .all: return 0
+        case .dev: return 1
+        case .stg: return 2
+        case .prd: return 3
+        }
+    }
+
     var color: Color {
         switch self {
         case .all: return NBColor.textDim
@@ -80,9 +94,9 @@ enum NBHotKeyModifier: String, CaseIterable, Identifiable, Codable {
     var costNote: String {
         switch self {
         case .control:
-            return "⌃K and ⌃N are standard text-editing and shell bindings (kill-line, move-down). Notchboard only claims them while Xcode or Simulator is frontmost, so they keep working in Terminal and everywhere else."
+            return "⌃K and ⌃N are standard text-editing and shell bindings (kill-line, move-down). Notchboard only takes them over while Xcode or Simulator is frontmost, so they keep working in Terminal and everywhere else."
         case .command:
-            return "⌘N is New File in Xcode and ⌘K is Clear Console. Notchboard only claims them while Xcode or Simulator is frontmost, so ⌘N still makes a new file in Xcode… which is probably not what you want. Prefer ⌃ or ⌥⌘."
+            return "⌘N is New File in Xcode and ⌘K is Clear Console. Notchboard only takes them over while Xcode or Simulator is frontmost, so ⌘N still makes a new file in Xcode… which is probably not what you want. Prefer ⌃ or ⌥⌘."
         case .optionCommand:
             return "Collides with almost nothing, and is what comparable menu-bar utilities ship. The safest choice."
         }
@@ -121,12 +135,17 @@ struct NBField: Identifiable, Codable, Equatable {
     var key: String
     var label: String
     var type: NBFieldType
+    /// The allowed values of a `.picker` field. Empty (the default, and the only sensible
+    /// value for every other type) means the form falls back to free text — a picker with
+    /// nothing to pick from would be a dead control.
+    var options: [String]
 
-    init(id: UUID = UUID(), key: String, label: String, type: NBFieldType) {
+    init(id: UUID = UUID(), key: String, label: String, type: NBFieldType, options: [String] = []) {
         self.id = id
         self.key = key
         self.label = label
         self.type = type
+        self.options = options
     }
 }
 
@@ -136,7 +155,7 @@ struct NBMember: Identifiable, Codable, Equatable {
 }
 
 struct NBClaim: Codable, Equatable {
-    var who: String   // member id, or "you"
+    var who: String   // member id
     var claimedAt: Date
 
     /// Live age of the claim — drives the age labels and auto-release.
@@ -175,33 +194,18 @@ struct NBClaim: Codable, Equatable {
         self.init(who: who, claimedAt: Date().addingTimeInterval(TimeInterval(-minutesAgo * 60)))
     }
 
-    // Custom decoding keeps pre-claimedAt state files (which stored minutesAgo) loadable.
-    private enum CodingKeys: String, CodingKey {
-        case who, claimedAt, minutesAgo
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        who = try container.decode(String.self, forKey: .who)
-        if let date = try container.decodeIfPresent(Date.self, forKey: .claimedAt) {
-            claimedAt = date
-        } else {
-            let legacyMinutes = try container.decodeIfPresent(Int.self, forKey: .minutesAgo) ?? 0
-            claimedAt = Date().addingTimeInterval(TimeInterval(-legacyMinutes * 60))
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(who, forKey: .who)
-        try container.encode(claimedAt, forKey: .claimedAt)
-    }
+    // Codable is synthesised: who + claimedAt is the whole wire format. No pre-release
+    // compatibility decoding (vision.md §14.5).
 }
 
 struct NBElement: Identifiable, Codable, Equatable {
     let id: String
     var name: String
-    var env: NBEnvironment
+    /// Every environment this element is valid in. A set rather than a single value
+    /// because the same credentials very often exist in more than one place (the same test
+    /// account seeded into dev and staging), and forcing a choice made people duplicate
+    /// the row. Never contains `.all`.
+    var environments: Set<NBEnvironment>
     var isFavorite: Bool
     var claimedBy: NBClaim?
     var note: String
@@ -209,6 +213,18 @@ struct NBElement: Identifiable, Codable, Equatable {
     var values: [String: String]
 
     var isClaimed: Bool { claimedBy != nil }
+
+    /// Environments in display order (DEV, STG, PRD).
+    var sortedEnvironments: [NBEnvironment] {
+        environments.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    /// True when this element mixes production with anything else — the combination worth
+    /// warning about, since a prod credential reachable from a dev build is how prod data
+    /// ends up in a staging log.
+    var mixesProductionWithOthers: Bool {
+        environments.contains(.prd) && environments.count > 1
+    }
 }
 
 struct NBGroup: Identifiable, Codable, Equatable {
@@ -262,14 +278,14 @@ struct NBWorkspace: Codable, Equatable {
     /// imported file whose team you're not part of. Ingestion points run this so the state can
     /// heal itself rather than requiring the user to delete the element.
     @discardableResult
-    mutating func releaseOrphanedClaims() -> Int {
+    mutating func releaseOrphanedClaims(ownedBy selfIDs: Set<String>) -> Int {
         var released = 0
         for (groupID, group) in groups {
             var group = group
             var changed = false
             for index in group.elements.indices {
                 guard let claim = group.elements[index].claimedBy,
-                      claim.who != "you",
+                      !selfIDs.contains(claim.who),
                       members[claim.who] == nil else { continue }
                 group.elements[index].claimedBy = nil
                 changed = true
@@ -289,6 +305,13 @@ struct NBWorkspace: Codable, Equatable {
     /// (then leftover groups, sorted) so the outcome is deterministic.
     mutating func deduplicateElementIDs() {
         var seen = Set<String>()
+        deduplicateElementIDs(seen: &seen)
+    }
+
+    /// Multi-collection variant: the caller threads one `seen` set through every workspace
+    /// so uniqueness holds across collections, not just within one (Keychain account keys
+    /// carry no collection component — see NBCollection).
+    mutating func deduplicateElementIDs(seen: inout Set<String>) {
         let orderedGroupIDs = groupOrder + groups.keys.filter { !groupOrder.contains($0) }.sorted()
         for groupID in orderedGroupIDs {
             guard var group = groups[groupID] else { continue }
@@ -298,7 +321,7 @@ struct NBWorkspace: Codable, Equatable {
                 if seen.insert(element.id).inserted { continue }
                 group.elements[index] = NBElement(
                     id: UUID().uuidString,
-                    name: element.name, env: element.env, isFavorite: element.isFavorite,
+                    name: element.name, environments: element.environments, isFavorite: element.isFavorite,
                     claimedBy: element.claimedBy, note: element.note,
                     lastUsed: element.lastUsed, values: element.values
                 )
@@ -307,6 +330,23 @@ struct NBWorkspace: Codable, Equatable {
             }
             if changed { groups[groupID] = group }
         }
+    }
+
+    /// The workspace with every claim removed. Exports go through this: a claim is a
+    /// status light, not a document, and one frozen into a file arrives stale by
+    /// construction — the tom/sara/mia bug delivered by Slack attachment (vision.md §14).
+    func clearingClaims() -> NBWorkspace {
+        var result = self
+        for (groupID, group) in groups {
+            var group = group
+            var changed = false
+            for index in group.elements.indices where group.elements[index].claimedBy != nil {
+                group.elements[index].claimedBy = nil
+                changed = true
+            }
+            if changed { result.groups[groupID] = group }
+        }
+        return result
     }
 
     /// Every Keychain account key ("<elementID>.<fieldKey>") for secret values in this

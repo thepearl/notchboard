@@ -25,6 +25,29 @@ struct EnvironmentFilterView: View {
     }
 }
 
+/// The environment badges on a row or a detail header. An element can live in several at
+/// once, so this renders the whole set in a fixed order rather than one value.
+struct EnvironmentBadges: View {
+    let environments: [NBEnvironment]
+    var size: CGFloat = 9
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(environments) { env in
+                Text(env.rawValue)
+                    .font(NBFont.mono(size))
+                    .foregroundStyle(env.color)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
+                            .stroke(env.color.opacity(0.4), lineWidth: 1)
+                    )
+            }
+        }
+    }
+}
+
 struct EnvChip: View {
     let label: String
     let isActive: Bool

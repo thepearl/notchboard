@@ -16,10 +16,12 @@ import UniformTypeIdentifiers
 
 enum WorkspaceFileDialogs {
     /// Asks for a collection file to read. Returns nil when the user cancels.
+    /// Plain .json is accepted on its own merits: an export IS json inside, so a renamed
+    /// or hand-written file should still be selectable here.
     @MainActor
     static func chooseImportFile(title: String = "Import Collection") -> URL? {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
+        panel.allowedContentTypes = [.notchboardCollection, .json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.title = title
@@ -32,8 +34,8 @@ enum WorkspaceFileDialogs {
     @MainActor
     static func chooseExportDestination(defaultName: String, title: String = "Export Collection") -> URL? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "\(defaultName).notchboard.json"
+        panel.allowedContentTypes = [.notchboardCollection]
+        panel.nameFieldStringValue = "\(defaultName).notchboard"
         panel.title = title
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK else { return nil }

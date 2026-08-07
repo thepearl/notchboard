@@ -81,7 +81,7 @@ final class GlobalHotKeys {
         isEnabled = enabled
         if enabled {
             registerAll()
-            Self.logger.log("claimed \(self.registrations.count, privacy: .public) global hot key(s)")
+            Self.logger.log("registered \(self.registrations.count, privacy: .public) global hot key(s)")
         } else {
             let count = registrations.count
             unregisterAll()

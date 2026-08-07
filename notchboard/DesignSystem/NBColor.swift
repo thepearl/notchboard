@@ -24,12 +24,19 @@ enum NBColor {
     static let headerBorder = Color(hex: 0x1d2027)
 
     // MARK: Text
+    //
+    // The greys were lifted on 2026-08-07 for legibility: the prototype's values
+    // (secondary 0x5b6270, muted 0x464d5a) sat at roughly 2.5:1 against the panel, which
+    // is below WCAG AA even for large text, and field labels were genuinely hard to read
+    // for someone with no sight problems at all. Every step below now clears 4.5:1
+    // against the panel/field backgrounds while keeping the carbon direction — this is a
+    // grey scale that reads, not a brighter palette.
     static let textPrimary = Color(hex: 0xf0efec)
     static let textPrimaryAlt = Color(hex: 0xe8e7e3)
-    static let textSecondary = Color(hex: 0x5b6270)
-    static let textSecondaryAlt = Color(hex: 0x8a92a3)
-    static let textMuted = Color(hex: 0x464d5a)
-    static let textDim = Color(hex: 0x6a7180)
+    static let textSecondary = Color(hex: 0x8b93a2)
+    static let textSecondaryAlt = Color(hex: 0xa9b1bf)
+    static let textMuted = Color(hex: 0x7f8797)
+    static let textDim = Color(hex: 0x99a1b0)
     static let textFieldValue = Color(hex: 0xd6d4cf)
 
     // MARK: Accents

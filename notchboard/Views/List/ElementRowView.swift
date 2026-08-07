@@ -21,11 +21,12 @@ struct ElementRowView: View {
                 // outside enlarges the layout slot without enlarging the hit area, so the
                 // star was only clickable on the glyph itself.
                 Text(element.isFavorite ? "★" : "☆")
-                    .font(NBFont.mono(10))
+                    .font(NBFont.mono(13.5))
                     .foregroundStyle(element.isFavorite ? NBColor.amber : NBColor.textMuted)
-                    .frame(width: 16, height: 22)
+                    .frame(width: 20, height: 24)
             }
             .buttonStyle(.nbPlain)
+            .help(element.isFavorite ? "unfavourite" : "favourite")
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(element.name)
@@ -33,7 +34,7 @@ struct ElementRowView: View {
                     .foregroundStyle(NBColor.textPrimaryAlt)
                     .lineLimit(1)
                 Text(viewModel.secondaryText(for: element, in: viewModel.activeGroup))
-                    .font(NBFont.mono(10))
+                    .font(NBFont.mono(10.5))
                     .foregroundStyle(NBColor.textSecondary)
                     .lineLimit(1)
             }
@@ -44,10 +45,13 @@ struct ElementRowView: View {
                 ClaimBadge(
                     who: viewModel.memberName(claim.who),
                     ageLabel: claim.ageLabel,
-                    envLabel: element.env.rawValue.lowercased(),
+                    envLabel: element.sortedEnvironments.map { $0.rawValue.lowercased() }.joined(separator: "/"),
                     // Only the user's own claims are swept by auto-release; teammates'
                     // mock claims never release, and a countdown for them was a lie.
-                    autoReleaseIn: claim.who == "you" ? max(0, viewModel.autoReleaseMinutes - claim.minutesAgo) : nil,
+                    autoReleaseIn: viewModel.isMine(claim) ? max(0, viewModel.autoReleaseMinutes - claim.minutesAgo) : nil,
+                    // Waiting on a row to free only makes sense when someone else could
+                    // free it — solo, the button was a promise nobody could keep.
+                    showNotify: !viewModel.isSolo,
                     isShowingTip: viewModel.tooltipElementID == element.id,
                     onEnter: { viewModel.showClaimTooltip(element.id) },
                     onLeave: { viewModel.scheduleClaimTooltipDismissal() },
@@ -66,12 +70,7 @@ struct ElementRowView: View {
                 )
             }
 
-            Text(element.env.rawValue)
-                .font(NBFont.mono(8))
-                .foregroundStyle(element.env.color)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(element.env.color.opacity(0.35), lineWidth: 1))
+            EnvironmentBadges(environments: element.sortedEnvironments, size: 8.5)
 
             Button {
                 viewModel.copyPrimaryField(of: element)
@@ -108,6 +107,8 @@ private struct ClaimBadge: View {
     let envLabel: String
     /// Nil for teammates' claims — only the user's own claims actually auto-release.
     let autoReleaseIn: Int?
+    /// Hidden while solo — notify-when-free needs a teammate to do the freeing.
+    let showNotify: Bool
     let isShowingTip: Bool
     let onEnter: () -> Void
     let onLeave: () -> Void
@@ -167,7 +168,7 @@ private struct ClaimBadge: View {
                 Text(who)
                     .font(NBFont.ui(11, weight: .semibold))
                     .foregroundStyle(NBColor.textPrimaryAlt)
-                Text("claimed \(ageLabel) · \(envLabel)")
+                Text("in use · \(ageLabel) · \(envLabel)")
                     .font(NBFont.mono(8.5))
                     .foregroundStyle(NBColor.green)
                 if let autoReleaseIn {
@@ -175,16 +176,18 @@ private struct ClaimBadge: View {
                         .font(NBFont.mono(8.5))
                         .foregroundStyle(NBColor.textSecondary)
                 }
-                Button(action: onNotify) {
-                    Text("notify when free")
-                        .font(NBFont.mono(8.5))
-                        .foregroundStyle(NBColor.amber)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                if showNotify {
+                    Button(action: onNotify) {
+                        Text("notify when free")
+                            .font(NBFont.mono(8.5))
+                            .foregroundStyle(NBColor.amber)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                    }
+                    .buttonStyle(.nbPlain)
+                    .padding(.top, 2)
                 }
-                .buttonStyle(.nbPlain)
-                .padding(.top, 2)
             }
             .padding(11)
             .frame(width: 180)

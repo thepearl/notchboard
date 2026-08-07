@@ -54,15 +54,23 @@ struct NotchboardSceneView: View {
             viewModel.backToList()
             return .handled
         }
-        .onChange(of: viewModel.workspace) { persist() }
+        // Collections cover the old per-workspace and per-scheme observations: the deeplink
+        // scheme lives inside NBCollection now, so one Equatable comparison catches both
+        // catalogue mutations and settings edits.
+        .onChange(of: viewModel.collections) { persist() }
+        .onChange(of: viewModel.activeCollectionID) { persist() }
         .onChange(of: viewModel.autoReleaseMinutes) { persist() }
         .onChange(of: viewModel.startExpanded) { persist() }
-        .onChange(of: viewModel.deeplinkScheme) { persist() }
         .onChange(of: viewModel.dockEdge) { persist() }
         .onChange(of: viewModel.hotKeyModifier) { persist() }
         .onChange(of: viewModel.pendingCoachMark) { persist() }
         .onChange(of: onboarding.isPresented) { persist() }
-        .onChange(of: onboarding.name) { persist() }
+        .onChange(of: onboarding.name) {
+            // The onboarding name is the claim label (vision.md §14.2) — keep the view
+            // model's copy in step so claims made right after typing it are labelled.
+            viewModel.selfName = onboarding.name
+            persist()
+        }
         // Deliberately NOT observing the tracker here: its properties are rewritten by a
         // sub-second poll, and a SwiftUI dependency on it re-rendered the whole panel tree
         // several times per second (~25% CPU, caught by profiling). The deferred coach
@@ -149,11 +157,13 @@ struct NotchboardSceneView: View {
         case .importFile:
             guard let url = WorkspaceFileDialogs.chooseImportFile() else { return false }
             do {
-                let imported = try WorkspaceTransfer.importWorkspace(from: try Data(contentsOf: url))
-                viewModel.replaceWorkspace(with: imported)
+                // The interactive flow handles the encrypted-secrets prompt (with its
+                // skip path); nil means the user cancelled there.
+                guard let imported = try WorkspaceImportFlow.importInteractively(from: url) else { return false }
+                viewModel.replaceActiveCollection(with: imported)
                 return true
             } catch {
-                viewModel.toast("import failed — not a notchboard collection file", color: .red)
+                viewModel.toast(WorkspaceImportFlow.userMessage(for: error), color: .red)
                 return false
             }
         }

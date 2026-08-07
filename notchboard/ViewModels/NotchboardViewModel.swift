@@ -34,7 +34,43 @@ final class NotchboardViewModel {
     var pendingCoachMark: Bool = false
 
     // MARK: Data
-    var workspace: NBWorkspace = MockData.workspace()
+    /// Every catalogue this Mac holds — Postman-style collections (vision.md §14). Never
+    /// empty: deletion refuses to remove the last one and restore falls back to seed data.
+    var collections: [NBCollection]
+    /// Which collection the panel is showing. Everything single-catalogue below resolves
+    /// through it.
+    var activeCollectionID: String
+
+    // MARK: Identity (vision.md §14.2 — the standing prerequisite for any future sync)
+    /// Stable local member id: what this user's claims are attributed to. Persisted
+    /// across launches (vision.md §14.2).
+    var selfMemberID: String = UUID().uuidString
+    /// The onboarding display name. Labels this user's claims; empty falls back to "you".
+    var selfName: String = ""
+
+    /// The collection everything single-catalogue routes through. Falls back to the first
+    /// one so a stale id degrades gracefully instead of trapping (same posture as
+    /// `activeGroup`).
+    var activeCollection: NBCollection {
+        collections.first { $0.id == activeCollectionID }
+            ?? collections.first
+            ?? NBCollection(workspace: NBWorkspace(name: "", groupOrder: [], groups: [:], members: [:]))
+    }
+
+    private var activeCollectionIndex: Int? {
+        collections.firstIndex { $0.id == activeCollectionID } ?? (collections.isEmpty ? nil : 0)
+    }
+
+    /// The active catalogue. A computed facade over `collections`, so the three dozen
+    /// existing call sites — every one already a read-modify-write — kept compiling
+    /// unchanged when one workspace became many.
+    var workspace: NBWorkspace {
+        get { activeCollection.workspace }
+        set {
+            guard let index = activeCollectionIndex else { return }
+            collections[index].workspace = newValue
+        }
+    }
 
     // MARK: Navigation / filters
     var activeGroupID: String = "users"
@@ -58,7 +94,9 @@ final class NotchboardViewModel {
     /// Non-nil while the add form is editing an existing element instead of creating one.
     var editingElementID: String?
     var addName: String = ""
-    var addEnvironment: NBEnvironment = .dev
+    /// Multi-select: an element can live in several environments at once (see
+    /// `NBElement.environments`). Never contains `.all`, and never empty when saving.
+    var addEnvironments: Set<NBEnvironment> = [.dev]
     var addNote: String = ""
     var addValues: [String: String] = [:]
 
@@ -81,10 +119,21 @@ final class NotchboardViewModel {
     var autoReleaseMinutes: Int = 60
     var startExpanded: Bool = true
     /// The target app's debug URL scheme for "login on sim" — e.g. "brewly" fires
-    /// brewly://debug/login?user=…. Empty means the deeplink bridge is unconfigured.
-    var deeplinkScheme: String = ""
+    /// brewly://debug/login?user=…. Per collection since Phase 2: each catalogue describes
+    /// one app, so switching collections switches the app you deeplink into. Empty means
+    /// the bridge is unconfigured for this collection.
+    var deeplinkScheme: String {
+        get { activeCollection.deeplinkScheme }
+        set {
+            guard let index = activeCollectionIndex else { return }
+            collections[index].deeplinkScheme = newValue
+        }
+    }
     /// Which edge of the Simulator window the notch/panel docks to.
     var dockEdge: NBDockEdge = .right
+    /// Set once the user ticks "don't warn me again" in the production-mixing dialog.
+    /// Persisted: a warning you've dismissed for good should stay dismissed.
+    var suppressProductionMixWarning: Bool = false
     /// Modifier for the global K/N chords. Control by default: ⌃K/⌃N collide only with the
     /// emacs-style text bindings most people never use, whereas ⌘N is New File in Xcode.
     /// See NBHotKeyModifier for the full tradeoff.
@@ -100,6 +149,9 @@ final class NotchboardViewModel {
     @ObservationIgnored private var autoReleaseTimer: Timer?
 
     init() {
+        let seed = NBCollection(workspace: MockData.workspace())
+        collections = [seed]
+        activeCollectionID = seed.id
         autoReleaseTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.releaseExpiredClaims()
         }
@@ -112,15 +164,17 @@ final class NotchboardViewModel {
     /// Builds a snapshot of everything worth persisting between launches.
     func persistableState(onboardingCompleted: Bool, onboardingName: String) -> PersistedAppState {
         PersistedAppState(
-            workspace: workspace,
+            collections: collections,
+            activeCollectionID: activeCollectionID,
+            memberID: selfMemberID,
             autoReleaseMinutes: autoReleaseMinutes,
             startExpanded: startExpanded,
-            deeplinkScheme: deeplinkScheme,
             dockEdge: dockEdge,
             onboardingCompleted: onboardingCompleted,
             onboardingName: onboardingName,
             coachMarkPending: pendingCoachMark,
-            hotKeyModifier: hotKeyModifier
+            hotKeyModifier: hotKeyModifier,
+            suppressProductionMixWarning: suppressProductionMixWarning
         )
     }
 
@@ -129,16 +183,28 @@ final class NotchboardViewModel {
     /// trusted: `groupOrder`/`groups` are reconciled, and an unusable workspace falls back
     /// to fresh seed data instead of stranding (or crashing) the UI.
     func restore(from persisted: PersistedAppState) {
-        var restored = persisted.workspace
-        restored.reconcileGroupOrder()
-        // A claim by someone absent from `members` can never be released through the UI, so
-        // it would lock the row and inflate the notch badge permanently. Heal it on load.
-        let orphaned = restored.releaseOrphanedClaims()
-        if restored.groups.isEmpty {
-            restored = MockData.workspace()
+        selfMemberID = persisted.memberID
+        selfName = persisted.onboardingName
+
+        var restored = persisted.collections
+        var orphaned = 0
+        for index in restored.indices {
+            restored[index].workspace.reconcileGroupOrder()
+            // A claim by someone absent from `members` can never be released through the UI,
+            // so it would lock the row and inflate the notch badge permanently. Heal on load.
+            orphaned += restored[index].workspace.releaseOrphanedClaims(ownedBy: [selfMemberID])
+        }
+        // A collection with no groups at all can't hold or accept anything — same fallback
+        // the single-workspace restore had, generalised.
+        restored.removeAll { $0.workspace.groups.isEmpty }
+        if restored.isEmpty {
+            restored = [NBCollection(workspace: MockData.workspace())]
         }
 
-        workspace = restored
+        collections = restored
+        activeCollectionID = restored.contains { $0.id == persisted.activeCollectionID }
+            ? persisted.activeCollectionID
+            : restored[0].id
         if workspace.groups[activeGroupID] == nil {
             activeGroupID = workspace.groupOrder.first ?? ""
         }
@@ -147,14 +213,14 @@ final class NotchboardViewModel {
         // claim within one 30s sweep.
         autoReleaseMinutes = persisted.autoReleaseMinutes.clamped(to: Self.autoReleaseRange)
         startExpanded = persisted.startExpanded
-        deeplinkScheme = persisted.deeplinkScheme
         dockEdge = persisted.dockEdge
         isExpanded = persisted.startExpanded
         pendingCoachMark = persisted.coachMarkPending
         hotKeyModifier = persisted.hotKeyModifier
+        suppressProductionMixWarning = persisted.suppressProductionMixWarning
 
         if orphaned > 0 {
-            toast("freed \(orphaned) element\(orphaned == 1 ? "" : "s") claimed by someone not in this catalogue", color: .amber)
+            toast("freed \(orphaned) element\(orphaned == 1 ? "" : "s") used by someone not in this catalogue", color: .amber)
         }
     }
 
@@ -192,7 +258,7 @@ final class NotchboardViewModel {
         let group = activeGroup
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = group.elements.filter { element in
-            let envMatches = environmentFilter == .all || element.env == environmentFilter
+            let envMatches = environmentFilter == .all || element.environments.contains(environmentFilter)
             guard envMatches else { return false }
             guard !query.isEmpty else { return true }
             let haystack = ([element.name, element.note] + Array(element.values.values))
@@ -215,8 +281,23 @@ final class NotchboardViewModel {
         return element.values[group.secondaryKey] ?? ""
     }
 
+    /// True when this claim belongs to the local user.
+    func isMine(_ claim: NBClaim) -> Bool {
+        claim.who == selfMemberID
+    }
+
+    /// How the local user's claims are labelled: the onboarding first name, lowercase to
+    /// match the row typography, with "you" as the fallback while no name is set. This is
+    /// the promise the identity step makes ("● ahmed") finally being kept.
+    var selfClaimLabel: String {
+        let first = selfName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ").first.map(String.init) ?? ""
+        return first.isEmpty ? "you" : first.lowercased()
+    }
+
     func memberName(_ who: String) -> String {
-        who == "you" ? "You" : (workspace.members[who]?.name ?? who)
+        if who == selfMemberID { return selfClaimLabel }
+        return workspace.members[who]?.name ?? who
     }
 
     func selectedElement(id: String) -> NBElement? {
@@ -250,7 +331,7 @@ final class NotchboardViewModel {
         addName = ""
         addValues = [:]
         addNote = ""
-        addEnvironment = .dev
+        addEnvironments = [.dev]
         currentView = .add
     }
 
@@ -259,13 +340,46 @@ final class NotchboardViewModel {
     func openEdit(_ element: NBElement) {
         editingElementID = element.id
         addName = element.name
-        // Preserve the element's env exactly (including .all) rather than coercing to .dev —
-        // saveElement writes this back, so a coercion here would silently mutate the env of
-        // any element edited for an unrelated reason.
-        addEnvironment = element.env
+        // Preserve the element's environments exactly rather than coercing — saveElement
+        // writes this back, so a coercion here would silently move any element edited for
+        // an unrelated reason. An element with none (hand-edited file) opens as dev so the
+        // form is never in an unsaveable state.
+        addEnvironments = element.environments.isEmpty ? [.dev] : element.environments
         addNote = element.note
         addValues = element.values
         currentView = .add
+    }
+
+    // MARK: - Actions: environment selection
+
+    /// Adds or removes an environment in the add/edit form, refusing to leave the element
+    /// with none (an element that belongs nowhere can never be found by the filter).
+    func toggleAddEnvironment(_ env: NBEnvironment) {
+        guard env != .all else { return }
+        if addEnvironments.contains(env) {
+            guard addEnvironments.count > 1 else {
+                toast("an element needs at least one environment", color: .red)
+                return
+            }
+            addEnvironments.remove(env)
+        } else {
+            addEnvironments.insert(env)
+        }
+    }
+
+    /// True when toggling `env` would mix production with another environment and the user
+    /// hasn't silenced the warning. The view shows the dialog, then calls
+    /// `toggleAddEnvironment` — keeping the decision here and the AppKit modal there makes
+    /// this testable without a window.
+    func productionMixWarningNeeded(togglingOn env: NBEnvironment) -> Bool {
+        guard !suppressProductionMixWarning, env != .all else { return false }
+        var candidate = addEnvironments
+        if candidate.contains(env) {
+            candidate.remove(env)
+        } else {
+            candidate.insert(env)
+        }
+        return candidate.contains(.prd) && candidate.count > 1
     }
 
     func openNewGroup() {
@@ -367,7 +481,7 @@ final class NotchboardViewModel {
         let element = group.elements[idx]
 
         if let claim = element.claimedBy {
-            if claim.who == "you" {
+            if isMine(claim) {
                 group.elements[idx].claimedBy = nil
                 workspace.groups[activeGroupID] = group
                 didFreeElement(group.elements[idx])
@@ -378,8 +492,8 @@ final class NotchboardViewModel {
                 toast("\(memberName(claim.who)) marked this in use — take it over from the detail view", color: .amber)
             }
         } else {
-            group.elements[idx].claimedBy = NBClaim(who: "you")
-            group.elements[idx].lastUsed = "just now, by you"
+            group.elements[idx].claimedBy = NBClaim(who: selfMemberID)
+            group.elements[idx].lastUsed = "just now, by \(selfClaimLabel)"
             workspace.groups[activeGroupID] = group
             copyPrimaryField(of: element)
         }
@@ -393,11 +507,11 @@ final class NotchboardViewModel {
     /// deliberate, explicitly-labelled takeover is the honest escape hatch, and it is what
     /// the old "ping them or claim anyway" copy promised without ever delivering it.
     func takeOver(_ elementID: String) {
-        guard let element = selectedElement(id: elementID), let claim = element.claimedBy, claim.who != "you" else { return }
+        guard let element = selectedElement(id: elementID), let claim = element.claimedBy, !isMine(claim) else { return }
         let previous = memberName(claim.who)
         mutate(elementID) {
-            $0.claimedBy = NBClaim(who: "you")
-            $0.lastUsed = "just now, by you"
+            $0.claimedBy = NBClaim(who: selfMemberID)
+            $0.lastUsed = "just now, by \(selfClaimLabel)"
         }
         toast("took “\(element.name)” from \(previous)", color: .amber)
     }
@@ -555,10 +669,12 @@ final class NotchboardViewModel {
             query += "&pass=\(encodedPass)"
         }
 
-        // Capture the element's owning group now: the simctl round-trip takes ~0.5-2s, and
-        // resolving through activeGroupID at callback time silently dropped the auto-claim
-        // whenever the user switched tabs mid-flight (while still toasting success).
+        // Capture the element's owning group AND collection now: the simctl round-trip
+        // takes ~0.5-2s, and resolving through the active ids at callback time silently
+        // dropped the auto-claim whenever the user switched tabs — or, since Phase 2,
+        // collections — mid-flight (while still toasting success).
         guard let owningGroupID = resolvedActiveGroupID else { return }
+        let owningCollectionID = activeCollectionID
         let wasFree = element.claimedBy == nil
         deeplinkOpener("\(scheme)://debug/login?\(query)") { [weak self] failure in
             guard let self else { return }
@@ -569,10 +685,10 @@ final class NotchboardViewModel {
             }
             // Logging in as this account is de facto using it — auto-claim if it was free
             // (vision §5.3), but only now that the deeplink actually succeeded.
-            if wasFree, self.element(element.id, in: owningGroupID)?.claimedBy == nil {
-                self.mutate(element.id, in: owningGroupID) {
-                    $0.claimedBy = NBClaim(who: "you")
-                    $0.lastUsed = "just now, by you"
+            if wasFree, self.element(element.id, group: owningGroupID, collection: owningCollectionID)?.claimedBy == nil {
+                self.mutate(element.id, group: owningGroupID, collection: owningCollectionID) {
+                    $0.claimedBy = NBClaim(who: self.selfMemberID)
+                    $0.lastUsed = "just now, by \(self.selfClaimLabel)"
                 }
             }
             self.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
@@ -594,37 +710,45 @@ final class NotchboardViewModel {
             copy(login, label: "login")
         }
 
-        switch selectedElement(id: element.id)?.claimedBy?.who {
+        switch selectedElement(id: element.id)?.claimedBy {
         case nil:
             mutate(element.id) {
-                $0.claimedBy = NBClaim(who: "you")
-                $0.lastUsed = "just now, by you"
+                $0.claimedBy = NBClaim(who: selfMemberID)
+                $0.lastUsed = "just now, by \(selfClaimLabel)"
             }
             toast("marked “\(element.name)” in use", color: .green)
-        case "you":
+        case .some(let claim) where isMine(claim):
             break // already yours; the copy toast is enough
-        case .some(let who):
-            toast("\(memberName(who)) has this — coordinate before using", color: .amber)
+        case .some(let claim):
+            toast("\(memberName(claim.who)) has this — coordinate before using", color: .amber)
         }
     }
 
-    private func releaseExpiredClaims() {
+    /// Internal (not private) so tests can drive the sweep deterministically instead of
+    /// waiting on the 30s timer.
+    func releaseExpiredClaims() {
         let limit = autoReleaseMinutes
-        for groupID in workspace.groupOrder {
-            guard var group = workspace.groups[groupID] else { continue }
-            var changed = false
-            for idx in group.elements.indices {
-                // Only auto-release your own idle claims — the manual path already refuses to
-                // release someone else's, and other members' claim ages are simulated/frozen
-                // in this local build, so sweeping them would be meaningless churn.
-                guard let claim = group.elements[idx].claimedBy,
-                      claim.who == "you", claim.minutesAgo >= limit else { continue }
-                group.elements[idx].claimedBy = nil
-                changed = true
-                didFreeElement(group.elements[idx])
-                toast("auto-released “\(group.elements[idx].name)” after \(limit)m idle", color: .green)
+        // Sweeps every collection, not just the visible one — your idle claim in a
+        // background collection ages exactly the same way (plan note: "releaseExpiredClaims
+        // must sweep all collections").
+        for cIndex in collections.indices {
+            for groupID in collections[cIndex].workspace.groupOrder {
+                guard var group = collections[cIndex].workspace.groups[groupID] else { continue }
+                var changed = false
+                for idx in group.elements.indices {
+                    // Only auto-release your own idle claims — the manual path already
+                    // refuses to release someone else's, and other members' claim ages are
+                    // simulated/frozen in this local build, so sweeping them would be
+                    // meaningless churn.
+                    guard let claim = group.elements[idx].claimedBy,
+                          isMine(claim), claim.minutesAgo >= limit else { continue }
+                    group.elements[idx].claimedBy = nil
+                    changed = true
+                    didFreeElement(group.elements[idx])
+                    toast("auto-released “\(group.elements[idx].name)” after \(limit)m idle", color: .green)
+                }
+                if changed { collections[cIndex].workspace.groups[groupID] = group }
             }
-            if changed { workspace.groups[groupID] = group }
         }
     }
 
@@ -647,6 +771,21 @@ final class NotchboardViewModel {
         workspace.groups[groupID]?.elements.first { $0.id == elementID }
     }
 
+    /// Fully-addressed variants for async completions: an element's owning *collection*
+    /// must be captured at fire time too, or a mid-flight collection switch would land the
+    /// mutation in whatever catalogue happens to be active when the callback runs.
+    private func mutate(_ elementID: String, group groupID: String, collection collectionID: String, _ change: (inout NBElement) -> Void) {
+        guard let cIndex = collections.firstIndex(where: { $0.id == collectionID }),
+              var group = collections[cIndex].workspace.groups[groupID],
+              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
+        change(&group.elements[idx])
+        collections[cIndex].workspace.groups[groupID] = group
+    }
+
+    private func element(_ elementID: String, group groupID: String, collection collectionID: String) -> NBElement? {
+        collections.first { $0.id == collectionID }?.workspace.groups[groupID]?.elements.first { $0.id == elementID }
+    }
+
     // MARK: - Actions: add/edit element
 
     func saveElement() {
@@ -662,11 +801,21 @@ final class NotchboardViewModel {
             toast("that value is reserved by notchboard — pick another", color: .red)
             return
         }
+        guard !addEnvironments.isEmpty else {
+            toast("pick at least one environment", color: .red)
+            return
+        }
+        // The form's controls make most wrong values hard to type, but values also arrive
+        // from imports and hand-edited files — this is the gate that actually holds.
+        if let problem = NBFieldValidation.firstProblem(in: addValues, fields: activeGroup.fields) {
+            toast(problem, color: .red)
+            return
+        }
 
         if let editingID = editingElementID {
             mutate(editingID) { element in
                 element.name = trimmedName
-                element.env = addEnvironment
+                element.environments = addEnvironments
                 element.note = addNote.trimmingCharacters(in: .whitespacesAndNewlines)
                 element.values = addValues
             }
@@ -685,9 +834,9 @@ final class NotchboardViewModel {
         }
         let element = NBElement(
             id: UUID().uuidString,
-            name: trimmedName, env: addEnvironment, isFavorite: false, claimedBy: nil,
+            name: trimmedName, environments: addEnvironments, isFavorite: false, claimedBy: nil,
             note: addNote.trimmingCharacters(in: .whitespacesAndNewlines),
-            lastUsed: "just now, by you", values: addValues
+            lastUsed: "just now, by \(selfClaimLabel)", values: addValues
         )
         group.elements.append(element)
         workspace.groups[groupID] = group
@@ -817,45 +966,192 @@ final class NotchboardViewModel {
         toast("group “\(group.label)” deleted", color: .red)
     }
 
+    // MARK: - Actions: collections
+
+    /// Element ids across every collection *except* the one identified by `excluding` —
+    /// the seed for cross-collection dedup at each ingestion point (Keychain account keys
+    /// carry no collection component, see NBCollection).
+    private func elementIDs(excluding excludedCollectionID: String? = nil) -> Set<String> {
+        Set(collections.lazy
+            .filter { $0.id != excludedCollectionID }
+            .flatMap { $0.workspace.groups.values }
+            .flatMap { $0.elements.map(\.id) })
+    }
+
+    /// Returns the panel to a coherent state after the catalogue under it changed
+    /// wholesale (collection switch/delete, import, seed adoption).
+    private func resetTransientUIState() {
+        currentView = .list
+        searchText = ""
+        revealedFieldKeys = []
+        keyboardSelectionID = nil
+        editingElementID = nil
+        editingGroupID = nil
+        dismissClaimTooltip()
+    }
+
+    func switchCollection(_ id: String) {
+        guard id != activeCollectionID, collections.contains(where: { $0.id == id }) else { return }
+        activeCollectionID = id
+        resetTransientUIState()
+        activeGroupID = workspace.groupOrder.first ?? ""
+    }
+
+    func createCollection(named name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            toast("name the collection first", color: .red)
+            return
+        }
+        let collection = NBCollection(workspace: MockData.emptyWorkspace(name: trimmed))
+        collections.append(collection)
+        switchCollection(collection.id)
+        toast("“\(trimmed)” created — \(hotKeyModifier.symbolPrefix)N adds your first element", color: .green)
+    }
+
+    /// Sets the active collection's deeplink scheme, validating it the same way
+    /// `loginOnSim` does so a bad value is refused where it's typed rather than at the
+    /// moment someone needs the feature to work.
+    func setDeeplinkScheme(_ raw: String) {
+        deeplinkScheme = raw
+        let resolved = resolvedDeeplinkScheme
+        guard !resolved.isEmpty else {
+            // Store the resolved (empty) value, not the raw whitespace the user typed —
+            // "  " is not a scheme, and leaving it there makes `isEmpty` checks lie.
+            deeplinkScheme = ""
+            toast("deeplink scheme cleared — “login on sim” is off for “\(workspace.name)”", color: .amber)
+            return
+        }
+        guard Self.isValidDeeplinkScheme(resolved) else {
+            deeplinkScheme = ""
+            toast("“\(resolved)” isn't a custom URL scheme — use your app's debug scheme, e.g. notchdemo", color: .red)
+            return
+        }
+        deeplinkScheme = resolved
+        toast("“\(workspace.name)” now deeplinks into \(resolved)://", color: .green)
+    }
+
+    func renameActiveCollection(to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            toast("a collection needs a name", color: .red)
+            return
+        }
+        workspace.name = trimmed
+        toast("renamed to “\(trimmed)”", color: .green)
+    }
+
+    /// Duplicates the active collection. Every element in the copy gets a fresh id (they
+    /// all collide with the source by definition), so the copy's secrets land under their
+    /// own Keychain keys on the next save instead of aliasing the original's.
+    func duplicateActiveCollection() {
+        var seen = elementIDs()
+        var copyWorkspace = activeCollection.workspace
+        copyWorkspace.name += " copy"
+        copyWorkspace.deduplicateElementIDs(seen: &seen)
+        let copy = NBCollection(deeplinkScheme: activeCollection.deeplinkScheme, workspace: copyWorkspace)
+        collections.append(copy)
+        switchCollection(copy.id)
+        toast("duplicated as “\(copyWorkspace.name)”", color: .green)
+    }
+
+    /// Deletes the active collection and its Keychain secrets. Refuses to delete the last
+    /// one — the panel with zero collections is not a state anything else handles.
+    func deleteActiveCollection() {
+        guard collections.count > 1 else {
+            toast("this is the only collection — create another before deleting it", color: .red)
+            return
+        }
+        let doomed = activeCollection
+        for key in doomed.workspace.allSecretKeychainKeys {
+            SecretsStore.delete(for: key)
+        }
+        collections.removeAll { $0.id == doomed.id }
+        activeCollectionID = collections[0].id
+        resetTransientUIState()
+        activeGroupID = workspace.groupOrder.first ?? ""
+        toast("collection “\(doomed.name)” deleted", color: .red)
+    }
+
     // MARK: - Actions: import/export
 
-    /// Replaces the whole catalogue with an imported one. Any secret values are freshly
-    /// stripped (an export shouldn't carry them, but never trust an external file), the
-    /// group order is reconciled so a malformed file can't strand the UI, and the discarded
-    /// workspace's Keychain secrets are purged so they don't linger unreachable.
-    func replaceWorkspace(with imported: NBWorkspace) {
-        adopt(imported, blankingSecrets: true)
-        let count = workspace.groups.values.reduce(0) { $0 + $1.elements.count }
-        toast("imported “\(workspace.name)” · \(count) elements (secrets not included)", color: .green)
+    /// Replaces the active collection's catalogue with an imported one (onboarding's
+    /// "import a collection file" starting point — the seeded placeholder is what dies).
+    /// The trust boundary lives in the import pipeline (WorkspaceTransfer): in-band secret
+    /// values are force-blanked there, real ones only enter via the encrypted envelope, and
+    /// claims are stripped — so what arrives here is adopted as-is.
+    func replaceActiveCollection(with imported: NBWorkspace) {
+        adopt(imported)
+        toast("imported “\(workspace.name)” · \(workspace.elementCount) elements", color: .green)
     }
 
-    /// Adopts a freshly-seeded catalogue (onboarding's "sample" and "empty" starting points).
-    ///
-    /// Distinct from `replaceWorkspace` for one reason: that path blanks every secret, which
-    /// is right for a file of unknown provenance and wrong for seed data, whose sample
-    /// passwords are the point. Both share `adopt` so the reset behaviour can't drift.
+    /// Imports as a new collection alongside the existing ones — the menu path. Nothing is
+    /// destroyed. Same trust posture as `replaceActiveCollection`.
+    func addCollection(_ imported: NBWorkspace, deeplinkScheme: String = "") {
+        var clean = imported
+        clean.reconcileGroupOrder()
+        var seen = elementIDs()
+        clean.deduplicateElementIDs(seen: &seen)
+        let collection = NBCollection(deeplinkScheme: deeplinkScheme, workspace: clean)
+        collections.append(collection)
+        activeCollectionID = collection.id
+        resetTransientUIState()
+        activeGroupID = clean.groupOrder.first ?? ""
+        toast("imported “\(clean.name)” · \(clean.elementCount) elements", color: .green)
+    }
+
+    /// Adopts a freshly-seeded catalogue (onboarding's "sample" and "empty" starting
+    /// points). Shares `adopt` with the import-replace path so the reset behaviour can't
+    /// drift.
     func adoptSeedWorkspace(_ seeded: NBWorkspace) {
-        adopt(seeded, blankingSecrets: false)
+        adopt(seeded)
     }
 
-    /// Swaps in a new catalogue and returns the UI to a coherent state. Purges the outgoing
-    /// catalogue's Keychain entries — nothing else references them once it's gone.
-    private func adopt(_ incoming: NBWorkspace, blankingSecrets: Bool) {
+    /// Replaces every collection from a decrypted snapshot — the §14.5.2 recovery path.
+    /// Whole-app-wide on purpose: a snapshot is a consistent moment in time, and restoring
+    /// half of one would manufacture exactly the inconsistency it exists to undo.
+    func restoreCollections(_ incoming: [NBCollection], activeID: String) {
+        guard !incoming.isEmpty else {
+            toast("that snapshot is empty — nothing restored", color: .red)
+            return
+        }
+        for key in collections.allSecretKeychainKeys {
+            SecretsStore.delete(for: key)
+        }
+        var restored = incoming
+        for index in restored.indices {
+            restored[index].workspace.reconcileGroupOrder()
+        }
+        restored.deduplicateElementIDsAcrossCollections()
+        collections = restored
+        activeCollectionID = restored.contains { $0.id == activeID } ? activeID : restored[0].id
+        resetTransientUIState()
+        activeGroupID = workspace.groupOrder.first ?? ""
+        watchedElementIDs = []
+        toast("restored \(restored.count) collection\(restored.count == 1 ? "" : "s") from snapshot", color: .green)
+    }
+
+    /// Swaps the active collection's catalogue and returns the UI to a coherent state.
+    /// Purges the outgoing catalogue's Keychain entries — nothing else references them
+    /// once it's gone.
+    private func adopt(_ incoming: NBWorkspace) {
         for key in workspace.allSecretKeychainKeys {
             SecretsStore.delete(for: key)
         }
 
-        var clean = blankingSecrets ? incoming.mappingSecretValues { _, _, _ in "" } : incoming
+        var clean = incoming
         clean.reconcileGroupOrder()
-        // Duplicate element IDs would collide in the Keychain and make row actions hit the
-        // wrong element — remap them before adopting the workspace.
-        clean.deduplicateElementIDs()
+        // Duplicate element IDs — within the incoming file or against the *other*
+        // collections — would collide in the Keychain and make row actions hit the wrong
+        // element. Remap before adopting.
+        var seen = elementIDs(excluding: activeCollectionID)
+        clean.deduplicateElementIDs(seen: &seen)
         workspace = clean
         activeGroupID = clean.groupOrder.first ?? ""
-        currentView = .list
-        revealedFieldKeys = []
-        keyboardSelectionID = nil
-        watchedElementIDs = []
+        resetTransientUIState()
+        // Watches on the discarded catalogue's elements can never fire — drop only those.
+        let remaining = elementIDs()
+        watchedElementIDs = watchedElementIDs.intersection(remaining)
     }
 
     /// Drops empty-labelled fields, derives keys (preserving the stable key of any field

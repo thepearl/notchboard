@@ -23,7 +23,7 @@ struct OnboardingFlowTests {
             Issue.record("expected an error for an empty name")
             return
         }
-        vm.name = "Nadia Benali"
+        vm.name = "John Doe"
         guard case .advanced = vm.advance() else {
             Issue.record("expected to advance with a valid name")
             return
@@ -109,17 +109,19 @@ struct StartingPointSeedingTests {
         #expect(passwords.contains { !$0.isEmpty }, "sample passwords are the point of the sample")
     }
 
-    @Test("Importing still blanks secrets, whatever the file claims")
-    func importBlanksSecrets() {
-        let vm = NotchboardViewModel()
+    @Test("Importing force-blanks in-band secrets, whatever the file claims")
+    func importBlanksSecrets() throws {
         var hostile = MockData.workspace()
-        // A hand-crafted file carrying credentials must not inject them.
+        // A hand-crafted file carrying plaintext credentials must not inject them. Since
+        // Phase 3 the trust boundary lives in the transfer pipeline: real values only ever
+        // enter through the encrypted envelope, which can't be forged without the password.
         if var group = hostile.groups["users"], !group.elements.isEmpty {
             group.elements[0].values["password"] = "smuggled-in"
             hostile.groups["users"] = group
         }
-        vm.replaceWorkspace(with: hostile)
-        let smuggled = vm.workspace.groups["users"]?.elements.compactMap { $0.values["password"] } ?? []
+        let data = try JSONEncoder().encode(WorkspaceTransferFile(workspace: hostile))
+        let file = try WorkspaceTransfer.readFile(from: data)
+        let smuggled = file.workspace.groups["users"]?.elements.compactMap { $0.values["password"] } ?? []
         #expect(!smuggled.contains("smuggled-in"))
     }
 
@@ -127,7 +129,7 @@ struct StartingPointSeedingTests {
     func demoKeepsTheTeam() {
         let demo = MockData.demoWorkspace()
         #expect(!demo.members.isEmpty)
-        let foreign = demo.groups.values.flatMap(\.elements).compactMap(\.claimedBy).filter { $0.who != "you" }
+        let foreign = demo.groups.values.flatMap(\.elements).compactMap(\.claimedBy)
         #expect(!foreign.isEmpty)
     }
 }
