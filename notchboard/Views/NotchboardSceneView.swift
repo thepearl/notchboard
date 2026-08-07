@@ -24,7 +24,8 @@ struct NotchboardSceneView: View {
                 OnboardingView(
                     onboarding: onboarding,
                     onFinish: finishOnboarding,
-                    onToast: { message, color in viewModel.toast(message, color: color) }
+                    onToast: { message, color in viewModel.toast(message, color: color) },
+                    onChooseStartingPoint: applyStartingPoint
                 )
                 .transition(panelTransition)
             } else if viewModel.isExpanded {
@@ -134,6 +135,30 @@ struct NotchboardSceneView: View {
         }
     }
 
+    /// Fills the first catalogue from the starting point chosen in onboarding step 3.
+    /// Returns false when the user cancels the file picker or the file won't parse, so the
+    /// flow stays on step 3 instead of advancing into an app with nothing in it.
+    private func applyStartingPoint(_ choice: NBStartingPoint) -> Bool {
+        switch choice {
+        case .sample:
+            viewModel.adoptSeedWorkspace(MockData.workspace())
+            return true
+        case .empty:
+            viewModel.adoptSeedWorkspace(MockData.emptyWorkspace())
+            return true
+        case .importFile:
+            guard let url = WorkspaceFileDialogs.chooseImportFile() else { return false }
+            do {
+                let imported = try WorkspaceTransfer.importWorkspace(from: try Data(contentsOf: url))
+                viewModel.replaceWorkspace(with: imported)
+                return true
+            } catch {
+                viewModel.toast("import failed — not a notchboard collection file", color: .red)
+                return false
+            }
+        }
+    }
+
     private func finishOnboarding() {
         onboarding.isPresented = false
         // Coach mark now if Simulator is visible, deferred to its first appearance if not —
@@ -141,9 +166,16 @@ struct NotchboardSceneView: View {
         viewModel.showCoachMark = tracker.isSimulatorRunning
         viewModel.pendingCoachMark = !tracker.isSimulatorRunning
         viewModel.isExpanded = false
-        // Real numbers from the workspace actually loaded, and no "synced" claim — there
-        // is no backend behind this join yet.
-        viewModel.toast("joined \(viewModel.workspace.name) · \(viewModel.workspace.elementCount) elements", color: .green)
+        // Speaks to what the user actually chose, with real numbers, and never claims to have
+        // "joined" anything — there is nothing to join.
+        switch onboarding.startingPoint {
+        case .sample:
+            viewModel.toast("loaded “\(viewModel.workspace.name)” · \(viewModel.workspace.elementCount) elements", color: .green)
+        case .empty:
+            viewModel.toast("“\(viewModel.workspace.name)” ready — \(viewModel.hotKeyModifier.symbolPrefix)N to add your first element", color: .green)
+        case .importFile:
+            break // replaceWorkspace already toasted what it imported
+        }
     }
 }
 

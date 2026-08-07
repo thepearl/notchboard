@@ -9,6 +9,9 @@ struct OnboardingView: View {
     @Bindable var onboarding: OnboardingViewModel
     let onFinish: () -> Void
     let onToast: (String, NBToastColor) -> Void
+    /// Applies the chosen starting point (step 3). Returns false if it couldn't, so the flow
+    /// stays put rather than advancing into an empty app.
+    let onChooseStartingPoint: (NBStartingPoint) -> Bool
 
     var body: some View {
         ZStack {
@@ -70,9 +73,11 @@ struct OnboardingView: View {
         switch onboarding.step {
         case 1: WelcomeStep(onNext: handleNext)
         case 2: IdentityStep(onboarding: onboarding, onNext: handleNext)
-        case 3: JoinWorkspaceStep(onboarding: onboarding, onNext: handleNext, onCreateInstead: {
-            onToast("create-workspace flow: phase 2 — use an invite code for now", .amber)
-        })
+        case 3: StartingPointStep(
+            onboarding: onboarding,
+            onChoose: onChooseStartingPoint,
+            onNext: handleNext
+        )
         case 4: PermissionStep(onboarding: onboarding, onNext: handleNext)
         default: EmptyView()
         }
@@ -215,65 +220,60 @@ private struct IdentityStep: View {
     }
 }
 
-private struct JoinWorkspaceStep: View {
+/// Step 3: pick what the first catalogue contains.
+///
+/// Replaces the old "join your team's workspace" step, which demanded an invite code before it
+/// would let anyone through and then threw the code away — a hard team prerequisite for an app
+/// that works perfectly well alone.
+private struct StartingPointStep: View {
     @Bindable var onboarding: OnboardingViewModel
+    /// Applies the chosen starting point. Returns false when it couldn't (import cancelled or
+    /// the file was unreadable), in which case we stay on this step.
+    let onChoose: (NBStartingPoint) -> Bool
     let onNext: () -> Void
-    let onCreateInstead: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("join your team's workspace")
+            Text("start your catalogue")
                 .font(NBFont.ui(15, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
-            Text("everyone in a workspace sees the same live data.")
+            Text("it lives on this mac as one file. you can change all of this later.")
                 .font(NBFont.ui(11))
                 .foregroundStyle(NBColor.textSecondary)
                 .padding(.top, 4)
 
-            Text("INVITE CODE")
-                .nbMonoLabel(8, tracking: 0.8)
-                .padding(.top, 14)
-
-            TextField("", text: Binding(
-                get: { onboarding.code },
-                set: { onboarding.code = $0.uppercased() }
-            ), prompt: Text("NB-XXXX-XXXX").foregroundStyle(NBColor.textMuted))
-                .textFieldStyle(.plain)
-                .font(NBFont.mono(11))
-                .tracking(1)
-                .foregroundStyle(NBColor.amber)
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(NBColor.field)
-                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
-                .padding(.top, 5)
-
-            if onboarding.codeLooksValid {
-                foundWorkspaceCard
-                    .padding(.top, 12)
+            VStack(spacing: 6) {
+                ForEach(NBStartingPoint.allCases) { option in
+                    StartingPointCard(
+                        option: option,
+                        isSelected: onboarding.startingPoint == option
+                    ) {
+                        onboarding.startingPoint = option
+                    }
+                }
             }
+            .padding(.top, 14)
 
             Spacer()
 
             HStack {
-                Button(action: onCreateInstead) {
-                    Text("create a new workspace instead")
-                        .font(NBFont.mono(9))
-                        .foregroundStyle(NBColor.textSecondary)
-                }
-                .buttonStyle(.nbPlain)
+                // Honest about the state of the world: there is no backend, so there is
+                // nothing to join. Better than a button that pretends and toasts.
+                Text("joining a team? that needs the backend — not built yet.")
+                    .font(NBFont.mono(9))
+                    .foregroundStyle(NBColor.textMuted)
 
                 Spacer()
 
-                Button(action: onNext) {
-                    Text(onboarding.codeLooksValid ? "join \(Self.joinedWorkspace.name) →" : "join →")
+                Button {
+                    if onChoose(onboarding.startingPoint) { onNext() }
+                } label: {
+                    Text(onboarding.startingPoint.ctaLabel)
                         .font(NBFont.ui(11.5, weight: .bold))
-                        .foregroundStyle(onboarding.codeLooksValid ? NBColor.background : NBColor.textSecondary)
+                        .foregroundStyle(NBColor.background)
                         .padding(.horizontal, 24)
                         .frame(height: 36)
-                        .background(onboarding.codeLooksValid ? NBColor.amber : Color.clear)
-                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(onboarding.codeLooksValid ? NBColor.amber : NBColor.border, lineWidth: 1))
+                        .background(NBColor.amber)
                         .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 }
                 .buttonStyle(.nbPlain)
@@ -281,41 +281,45 @@ private struct JoinWorkspaceStep: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+}
 
-    /// The workspace the mock invite code "finds" — the same seed data the app actually
-    /// loads, so the numbers on this card are real rather than a hardcoded lie.
-    private static let joinedWorkspace = MockData.workspace()
+/// One selectable starting point. Geometry matches the permission step's card so the flow
+/// keeps one visual vocabulary.
+private struct StartingPointCard: View {
+    let option: NBStartingPoint
+    let isSelected: Bool
+    let onSelect: () -> Void
 
-    private var foundWorkspaceCard: some View {
-        let workspace = Self.joinedWorkspace
-        return HStack(spacing: 11) {
-            Rectangle()
-                .fill(NBColor.amber)
+    var body: some View {
+        HStack(spacing: 11) {
+            Text(option.glyph)
+                .font(NBFont.mono(12))
+                .foregroundStyle(isSelected ? NBColor.amber : NBColor.textSecondary)
                 .frame(width: 26, height: 26)
-                .overlay(Text("A").font(NBFont.ui(12, weight: .bold)).foregroundStyle(NBColor.background))
+                .background(isSelected ? NBColor.amber.opacity(0.1) : NBColor.chip)
+                .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(workspace.name)
-                    .font(NBFont.ui(12.5, weight: .bold))
+                Text(option.title)
+                    .font(NBFont.ui(12.5, weight: .semibold))
                     .foregroundStyle(NBColor.textPrimary)
-                Text("\(workspace.memberCount) members · \(workspace.groups.count) groups · \(workspace.elementCount) elements")
+                Text(option.detail)
                     .font(NBFont.mono(8.5))
                     .foregroundStyle(NBColor.textSecondary)
             }
 
-            Spacer()
-
-            HStack(spacing: -6) {
-                AvatarBubble(initials: "TV", color: NBColor.memberPurple)
-                AvatarBubble(initials: "SK", color: NBColor.memberPink)
-                AvatarBubble(initials: "MN", color: NBColor.memberTeal)
-            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(NBColor.green.opacity(0.05))
-        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.green.opacity(0.3), lineWidth: 1))
+        .background(isSelected ? NBColor.amber.opacity(0.05) : NBColor.field)
+        .overlay(
+            RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
+                .stroke(isSelected ? NBColor.amber : NBColor.borderSubtle, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
     }
 }
 

@@ -253,6 +253,33 @@ struct NBWorkspace: Codable, Equatable {
         groupOrder.append(contentsOf: unordered)
     }
 
+    /// Releases claims held by someone who isn't in `members` (and isn't you).
+    ///
+    /// Such a claim is unreleasable and meaningless: `claimOrRelease` refuses to release a
+    /// claim you don't own and the auto-release sweep skips foreign claims, so the row stays
+    /// locked forever and the notch badge counts it forever. That happened for real — the old
+    /// seed data shipped claims by three fictional teammates — and it can happen again via an
+    /// imported file whose team you're not part of. Ingestion points run this so the state can
+    /// heal itself rather than requiring the user to delete the element.
+    @discardableResult
+    mutating func releaseOrphanedClaims() -> Int {
+        var released = 0
+        for (groupID, group) in groups {
+            var group = group
+            var changed = false
+            for index in group.elements.indices {
+                guard let claim = group.elements[index].claimedBy,
+                      claim.who != "you",
+                      members[claim.who] == nil else { continue }
+                group.elements[index].claimedBy = nil
+                changed = true
+                released += 1
+            }
+            if changed { groups[groupID] = group }
+        }
+        return released
+    }
+
     /// Assigns fresh IDs to any element whose ID already appeared earlier — in the same
     /// group or another. Duplicate IDs break SwiftUI identity, make firstIndex-based
     /// actions always hit the first copy, and collide in the Keychain (whose account key

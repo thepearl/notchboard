@@ -166,9 +166,27 @@ struct DetailView: View {
                 .padding(.top, 2)
             }
 
-            // Second entry point for notify-when-free (the row tooltip is the other) —
-            // useful exactly when someone opened the detail hoping to use the element.
+            // The escape hatch for a claim nobody can release. Without a backend the claimant
+            // has no way to hand it back, so this is the only path off a locked row short of
+            // deleting the element.
             if let claim = element.claimedBy, claim.who != "you" {
+                Button {
+                    viewModel.takeOver(element.id)
+                } label: {
+                    Text("take over from \(viewModel.memberName(claim.who).lowercased())")
+                        .font(NBFont.ui(11))
+                        .foregroundStyle(NBColor.amber)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                }
+                .buttonStyle(.nbPlain)
+                .padding(.top, 2)
+            }
+
+            // Second entry point for notify-when-free (the row tooltip is the other) —
+            // only meaningful when there are teammates who might free it.
+            if let claim = element.claimedBy, claim.who != "you", !viewModel.isSolo {
                 Button {
                     viewModel.notifyWhenFree(element)
                 } label: {

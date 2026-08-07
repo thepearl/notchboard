@@ -131,6 +131,9 @@ final class NotchboardViewModel {
     func restore(from persisted: PersistedAppState) {
         var restored = persisted.workspace
         restored.reconcileGroupOrder()
+        // A claim by someone absent from `members` can never be released through the UI, so
+        // it would lock the row and inflate the notch badge permanently. Heal it on load.
+        let orphaned = restored.releaseOrphanedClaims()
         if restored.groups.isEmpty {
             restored = MockData.workspace()
         }
@@ -149,6 +152,10 @@ final class NotchboardViewModel {
         isExpanded = persisted.startExpanded
         pendingCoachMark = persisted.coachMarkPending
         hotKeyModifier = persisted.hotKeyModifier
+
+        if orphaned > 0 {
+            toast("freed \(orphaned) element\(orphaned == 1 ? "" : "s") claimed by someone not in this catalogue", color: .amber)
+        }
     }
 
     // MARK: - Derived
@@ -169,6 +176,11 @@ final class NotchboardViewModel {
         if workspace.groups[activeGroupID] != nil { return activeGroupID }
         return workspace.groupOrder.first { workspace.groups[$0] != nil }
     }
+
+    /// True when this catalogue has no other members, which is the normal case: Notchboard
+    /// works alone and there is no backend to populate a team. Drives hiding the UI that only
+    /// makes sense against a teammate's claim.
+    var isSolo: Bool { workspace.members.isEmpty }
 
     var claimedCount: Int {
         workspace.groupOrder.reduce(0) { total, id in
@@ -361,8 +373,9 @@ final class NotchboardViewModel {
                 didFreeElement(group.elements[idx])
                 toast("released “\(element.name)”", color: .green)
             } else {
-                // No force-claim exists in this local build — don't advertise one.
-                toast("\(memberName(claim.who)) has this — coordinate before using", color: .red)
+                // Deliberately does not release it — taking someone's element out from under
+                // them shouldn't be a single misclick. `takeOver` is the explicit path.
+                toast("\(memberName(claim.who)) marked this in use — take it over from the detail view", color: .amber)
             }
         } else {
             group.elements[idx].claimedBy = NBClaim(who: "you")
@@ -370,6 +383,23 @@ final class NotchboardViewModel {
             workspace.groups[activeGroupID] = group
             copyPrimaryField(of: element)
         }
+    }
+
+    /// Takes an element marked in use by someone else.
+    ///
+    /// Without a backend there is nobody on the other end to release it, so a foreign claim
+    /// is otherwise permanent: `claimOrRelease` refuses it and the auto-release sweep skips
+    /// it. That left rows locked forever — the seed data used to ship three of them. A
+    /// deliberate, explicitly-labelled takeover is the honest escape hatch, and it is what
+    /// the old "ping them or claim anyway" copy promised without ever delivering it.
+    func takeOver(_ elementID: String) {
+        guard let element = selectedElement(id: elementID), let claim = element.claimedBy, claim.who != "you" else { return }
+        let previous = memberName(claim.who)
+        mutate(elementID) {
+            $0.claimedBy = NBClaim(who: "you")
+            $0.lastUsed = "just now, by you"
+        }
+        toast("took “\(element.name)” from \(previous)", color: .amber)
     }
 
     func toggleReveal(elementID: String, fieldKey: String) {
@@ -794,14 +824,31 @@ final class NotchboardViewModel {
     /// group order is reconciled so a malformed file can't strand the UI, and the discarded
     /// workspace's Keychain secrets are purged so they don't linger unreachable.
     func replaceWorkspace(with imported: NBWorkspace) {
+        adopt(imported, blankingSecrets: true)
+        let count = workspace.groups.values.reduce(0) { $0 + $1.elements.count }
+        toast("imported “\(workspace.name)” · \(count) elements (secrets not included)", color: .green)
+    }
+
+    /// Adopts a freshly-seeded catalogue (onboarding's "sample" and "empty" starting points).
+    ///
+    /// Distinct from `replaceWorkspace` for one reason: that path blanks every secret, which
+    /// is right for a file of unknown provenance and wrong for seed data, whose sample
+    /// passwords are the point. Both share `adopt` so the reset behaviour can't drift.
+    func adoptSeedWorkspace(_ seeded: NBWorkspace) {
+        adopt(seeded, blankingSecrets: false)
+    }
+
+    /// Swaps in a new catalogue and returns the UI to a coherent state. Purges the outgoing
+    /// catalogue's Keychain entries — nothing else references them once it's gone.
+    private func adopt(_ incoming: NBWorkspace, blankingSecrets: Bool) {
         for key in workspace.allSecretKeychainKeys {
             SecretsStore.delete(for: key)
         }
 
-        var clean = imported.mappingSecretValues { _, _, _ in "" }
+        var clean = blankingSecrets ? incoming.mappingSecretValues { _, _, _ in "" } : incoming
         clean.reconcileGroupOrder()
-        // Duplicate element IDs in an imported file would collide in the Keychain and make
-        // row actions hit the wrong element — remap them before adopting the workspace.
+        // Duplicate element IDs would collide in the Keychain and make row actions hit the
+        // wrong element — remap them before adopting the workspace.
         clean.deduplicateElementIDs()
         workspace = clean
         activeGroupID = clean.groupOrder.first ?? ""
@@ -809,8 +856,6 @@ final class NotchboardViewModel {
         revealedFieldKeys = []
         keyboardSelectionID = nil
         watchedElementIDs = []
-        let count = clean.groups.values.reduce(0) { $0 + $1.elements.count }
-        toast("imported “\(clean.name)” · \(count) elements (secrets not included)", color: .green)
     }
 
     /// Drops empty-labelled fields, derives keys (preserving the stable key of any field

@@ -6,13 +6,57 @@
 import Foundation
 import Observation
 
+/// How a new user's first catalogue gets filled. Replaces the old invite-code step: a team
+/// is an upgrade, not a prerequisite, so nothing here gates on one existing.
+enum NBStartingPoint: String, CaseIterable, Identifiable {
+    case sample
+    case empty
+    case importFile
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sample: return "sample catalogue"
+        case .empty: return "empty catalogue"
+        case .importFile: return "import a collection file"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .sample: return "4 groups · 20 elements to poke at"
+        case .empty: return "one “users” group, nothing in it"
+        case .importFile: return "exported from another mac · secrets aren't included"
+        }
+    }
+
+    var glyph: String {
+        switch self {
+        case .sample: return "▣"
+        case .empty: return "＋"
+        case .importFile: return "⇥"
+        }
+    }
+
+    var ctaLabel: String {
+        switch self {
+        case .sample: return "load sample data →"
+        case .empty: return "start empty →"
+        case .importFile: return "choose file… →"
+        }
+    }
+}
+
 @Observable
 final class OnboardingViewModel {
     var isPresented: Bool = true
     var step: Int = 1
     var name: String = ""
-    var code: String = ""
     var accessibilityGranted: Bool = false
+    /// Which starting point the user picked on step 3. Sample is the default because an
+    /// empty panel teaches nothing on first launch.
+    var startingPoint: NBStartingPoint = .sample
 
     var initials: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -26,16 +70,12 @@ final class OnboardingViewModel {
         return first.lowercased()
     }
 
-    var codeLooksValid: Bool {
-        code.trimmingCharacters(in: .whitespacesAndNewlines).count >= 6
-    }
-
     func reset() {
         isPresented = true
         step = 1
         name = ""
-        code = ""
         accessibilityGranted = false
+        startingPoint = .sample
     }
 
     enum AdvanceResult {
@@ -52,14 +92,14 @@ final class OnboardingViewModel {
             return .advanced
         case 2:
             guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return .error("enter your name — it shows on claims")
+                return .error("enter your name — it labels what you mark in use")
             }
             step = 3
             return .advanced
         case 3:
-            guard codeLooksValid else {
-                return .error("paste an invite code from a teammate")
-            }
+            // No gate. Step 3 used to demand an invite code of six or more characters, which
+            // made a team a hard prerequisite for using the app at all. Choosing a starting
+            // point is now the whole job, and the view has already applied it by this point.
             step = 4
             return .advanced
         case 4:
