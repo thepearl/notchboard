@@ -117,7 +117,7 @@ struct CollectionViewModelTests {
         let countBefore = vm.workspace.elementCount
         vm.createCollection(named: "second")
         vm.openAdd()
-        vm.addName = "only in second"
+        vm.elementForm.name = "only in second"
         vm.saveElement()
         #expect(vm.workspace.elementCount == 1)
         vm.switchCollection(firstID)

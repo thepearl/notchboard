@@ -191,7 +191,7 @@ struct NotchboardViewModelBasicsTests {
         let vm = NotchboardViewModel()
         let countBefore = vm.activeGroup.elements.count
         vm.openAdd()
-        vm.addName = "   "
+        vm.elementForm.name = "   "
         vm.saveElement()
         #expect(vm.activeGroup.elements.count == countBefore)
     }
@@ -200,11 +200,11 @@ struct NotchboardViewModelBasicsTests {
     func openAddPreservesDraft() {
         let vm = NotchboardViewModel()
         vm.openAdd()
-        vm.addName = "half-typed draft"
-        vm.addValues["username"] = "draft-user"
+        vm.elementForm.name = "half-typed draft"
+        vm.elementForm.values["username"] = "draft-user"
         vm.openAdd() // a repeated ⌘N must not wipe the form
-        #expect(vm.addName == "half-typed draft")
-        #expect(vm.addValues["username"] == "draft-user")
+        #expect(vm.elementForm.name == "half-typed draft")
+        #expect(vm.elementForm.values["username"] == "draft-user")
     }
 
     @Test("openAdd after an edit starts clean, never leaking the edited values")
@@ -212,11 +212,11 @@ struct NotchboardViewModelBasicsTests {
         let vm = NotchboardViewModel()
         let element = vm.activeGroup.elements[0]
         vm.openEdit(element)
-        #expect(vm.addName == element.name)
+        #expect(vm.elementForm.name == element.name)
         vm.openAdd()
-        #expect(vm.editingElementID == nil)
-        #expect(vm.addName.isEmpty)
-        #expect(vm.addValues.isEmpty)
+        #expect(vm.elementForm.editingElementID == nil)
+        #expect(vm.elementForm.name.isEmpty)
+        #expect(vm.elementForm.values.isEmpty)
     }
 
     @Test("saveElement appends a new element to the active group")
@@ -224,7 +224,7 @@ struct NotchboardViewModelBasicsTests {
         let vm = NotchboardViewModel()
         let countBefore = vm.activeGroup.elements.count
         vm.openAdd()
-        vm.addName = "test element"
+        vm.elementForm.name = "test element"
         vm.saveElement()
         #expect(vm.activeGroup.elements.count == countBefore + 1)
         #expect(vm.activeGroup.elements.last?.name == "test element")

@@ -30,7 +30,7 @@ struct PhantomGroupTests {
         // Force the form open (openAdd refuses politely, but a stale view could still
         // reach saveElement) and try to save.
         vm.currentView = .add
-        vm.addName = "orphan element"
+        vm.elementForm.name = "orphan element"
         vm.saveElement()
 
         #expect(vm.workspace.groups[""] == nil)
@@ -50,7 +50,7 @@ struct PhantomGroupTests {
         let realGroupID = vm.workspace.groupOrder[0]
         vm.activeGroupID = "ghost-group"
         vm.currentView = .add
-        vm.addName = "element via stale id"
+        vm.elementForm.name = "element via stale id"
         vm.saveElement()
         #expect(vm.workspace.groups["ghost-group"] == nil)
         #expect(vm.workspace.groups[realGroupID]?.elements.contains { $0.name == "element via stale id" } == true)
@@ -67,7 +67,7 @@ struct FieldKeyTests {
             NBField(key: "", label: "user-id", type: .secret),
             NBField(key: "", label: "User Id!", type: .text),
         ]
-        let fields = NotchboardViewModel.normalisedFields(raw)
+        let fields = GroupFormModel.normalisedFields(raw)
         let keys = fields.map(\.key)
         #expect(keys.count == Set(keys).count, "keys must be unique: \(keys)")
     }
@@ -76,7 +76,7 @@ struct FieldKeyTests {
     func editPreservesStableKeys() {
         let original = NBField(key: "password", label: "password", type: .secret)
         let relabelled = NBField(id: original.id, key: original.key, label: "pass phrase", type: .secret)
-        let fields = NotchboardViewModel.normalisedFields([relabelled], existingByID: [original.id: original])
+        let fields = GroupFormModel.normalisedFields([relabelled], existingByID: [original.id: original])
         #expect(fields[0].key == "password")
     }
 
@@ -86,15 +86,15 @@ struct FieldKeyTests {
             NBField(key: "", label: "  ", type: .text),
             NBField(key: "", label: "name", type: .text),
         ]
-        #expect(NotchboardViewModel.normalisedFields(raw).count == 1)
+        #expect(GroupFormModel.normalisedFields(raw).count == 1)
     }
 
     @Test("saveGroup end to end produces unique keys for colliding labels")
     func saveGroupEndToEnd() {
         let vm = NotchboardViewModel()
         vm.openNewGroup()
-        vm.newGroupName = "collision test"
-        vm.newGroupFields = [
+        vm.groupForm.name = "collision test"
+        vm.groupForm.fields = [
             NBField(key: "", label: "token", type: .secret),
             NBField(key: "", label: "Token!", type: .text),
         ]
@@ -159,8 +159,8 @@ struct WorkspaceSanitisationTests {
         let vm = NotchboardViewModel()
         let countBefore = vm.activeGroup.elements.count
         vm.currentView = .add
-        vm.addName = "sentinel test"
-        vm.addValues["username"] = AppStateStore.keychainPlaceholder
+        vm.elementForm.name = "sentinel test"
+        vm.elementForm.values["username"] = AppStateStore.keychainPlaceholder
         vm.saveElement()
         #expect(vm.activeGroup.elements.count == countBefore)
     }

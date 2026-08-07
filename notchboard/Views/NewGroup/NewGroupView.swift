@@ -8,12 +8,20 @@ import UniformTypeIdentifiers
 
 struct NewGroupView: View {
     @Bindable var viewModel: NotchboardViewModel
+    /// The schema draft, bound directly — this view edits a group's shape, not the app.
+    @Bindable var draft: GroupFormModel
 
     @State private var confirmingDelete = false
     /// The field currently being dragged by its ⋮⋮ handle (vision §5.5 reorderable list).
     @State private var draggedFieldID: UUID?
 
-    private var isEditing: Bool { viewModel.editingGroupID != nil }
+    init(viewModel: NotchboardViewModel) {
+        self.viewModel = viewModel
+        // @Bindable's storage has to be assigned through its projected wrapper.
+        _draft = Bindable(viewModel.groupForm)
+    }
+
+    private var isEditing: Bool { draft.isEditing }
 
     var body: some View {
         ScrollView {
@@ -42,7 +50,7 @@ struct NewGroupView: View {
 
     private var nameField: some View {
         LabeledField(labelText: "GROUP NAME") {
-            TextField("", text: $viewModel.newGroupName, prompt: Text("e.g. Gift cards").foregroundStyle(NBColor.textMuted))
+            TextField("", text: $draft.name, prompt: Text("e.g. Gift cards").foregroundStyle(NBColor.textMuted))
                 .textFieldStyle(.plain)
                 .font(NBFont.ui(12))
                 .foregroundStyle(NBColor.textPrimary)
@@ -62,9 +70,9 @@ struct NewGroupView: View {
                 .padding(.top, 13)
 
             VStack(spacing: 6) {
-                ForEach($viewModel.newGroupFields) { $field in
+                ForEach($draft.fields) { $field in
                     FieldEditorRow(field: $field) {
-                        viewModel.removeNewGroupField(field.id)
+                        draft.removeField(field.id)
                     }
                     .opacity(draggedFieldID == field.id ? 0.4 : 1)
                     .onDrag {
@@ -74,12 +82,12 @@ struct NewGroupView: View {
                     .onDrop(of: [.text], delegate: FieldReorderDropDelegate(
                         targetID: field.id,
                         draggedID: $draggedFieldID,
-                        fields: $viewModel.newGroupFields
+                        fields: $draft.fields
                     ))
                 }
             }
 
-            Button(action: viewModel.addNewGroupField) {
+            Button(action: draft.addField) {
                 Text("＋ add field")
                     .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.amber)
@@ -95,7 +103,7 @@ struct NewGroupView: View {
             Spacer()
             Button {
                 if confirmingDelete {
-                    viewModel.deleteGroup(viewModel.editingGroupID ?? "")
+                    viewModel.deleteGroup(draft.editingGroupID ?? "")
                 } else {
                     confirmingDelete = true
                 }

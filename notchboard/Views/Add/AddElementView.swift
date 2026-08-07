@@ -7,6 +7,14 @@ import SwiftUI
 
 struct AddElementView: View {
     @Bindable var viewModel: NotchboardViewModel
+    /// The form's own state, bound directly: this view edits a draft element, not the app.
+    @Bindable var draft: ElementFormModel
+
+    init(viewModel: NotchboardViewModel) {
+        self.viewModel = viewModel
+        // @Bindable's storage has to be assigned through its projected wrapper.
+        _draft = Bindable(viewModel.elementForm)
+    }
 
     var body: some View {
         ScrollView {
@@ -23,7 +31,7 @@ struct AddElementView: View {
     private var header: some View {
         HStack(spacing: 9) {
             NBBackButton(action: viewModel.backToList)
-            Text(viewModel.editingElementID == nil ? "new \(viewModel.activeGroup.singular)" : "edit \(viewModel.activeGroup.singular)")
+            Text(draft.isEditing ? "edit \(viewModel.activeGroup.singular)" : "new \(viewModel.activeGroup.singular)")
                 .font(NBFont.ui(13, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
         }
@@ -32,7 +40,7 @@ struct AddElementView: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: 12) {
             LabeledField(labelText: "DISPLAY NAME") {
-                NBTextField(text: $viewModel.addName, placeholder: "e.g. Expired Card")
+                NBTextField(text: $draft.name, placeholder: "e.g. Expired Card")
             }
 
             ForEach(viewModel.activeGroup.fields) { field in
@@ -40,8 +48,8 @@ struct AddElementView: View {
                     FieldInput(
                         field: field,
                         value: Binding(
-                            get: { viewModel.addValues[field.key] ?? "" },
-                            set: { viewModel.addValues[field.key] = $0 }
+                            get: { draft.values[field.key] ?? "" },
+                            set: { draft.values[field.key] = $0 }
                         )
                     )
                 }
@@ -53,7 +61,7 @@ struct AddElementView: View {
                         ForEach(NBEnvironment.assignable) { env in
                             EnvChip(
                                 label: env.rawValue,
-                                isActive: viewModel.addEnvironments.contains(env),
+                                isActive: draft.environments.contains(env),
                                 activeColor: env.color
                             ) {
                                 toggle(env)
@@ -67,7 +75,7 @@ struct AddElementView: View {
             }
 
             LabeledField(labelText: "NOTE (optional)") {
-                NBTextEditor(text: $viewModel.addNote, placeholder: "why this element exists, e.g. “no card on file”")
+                NBTextEditor(text: $draft.note, placeholder: "why this element exists, e.g. “no card on file”")
             }
         }
         .padding(.top, 17)
@@ -77,7 +85,7 @@ struct AddElementView: View {
     /// thought: production alongside anything else (see EnvironmentWarningDialog).
     private func toggle(_ env: NBEnvironment) {
         if viewModel.productionMixWarningNeeded(togglingOn: env) {
-            let answer = EnvironmentWarningDialog.confirmProductionMix(elementName: viewModel.addName)
+            let answer = EnvironmentWarningDialog.confirmProductionMix(elementName: draft.name)
             if answer.suppressFuture { viewModel.suppressProductionMixWarning = true }
             guard answer.confirmed else { return }
         }
@@ -87,7 +95,7 @@ struct AddElementView: View {
     private var actions: some View {
         HStack(spacing: 6) {
             Button(action: viewModel.saveElement) {
-                Text(viewModel.editingElementID == nil ? "create \(viewModel.activeGroup.singular)" : "save changes")
+                Text(draft.isEditing ? "save changes" : "create \(viewModel.activeGroup.singular)")
                     .font(NBFont.ui(11.5, weight: .bold))
                     .foregroundStyle(NBColor.background)
                     .frame(maxWidth: .infinity)

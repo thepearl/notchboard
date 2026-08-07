@@ -2,17 +2,26 @@
 //  NotchboardViewModel.swift
 //  notchboard
 //
-//  Drives all interaction state for the UI/UX prototype layer — mirrors the state machine
-//  in Notchboard Prototype.dc.html. No networking/backend yet (see vision.md §9).
+//  The panel's coordinator: chrome, navigation, filters, settings, and the actions that
+//  need more than one collaborator (claiming, the deeplink bridge, import/export).
+//
+//  What it deliberately does NOT own any more, after the 2026-08-07 decomposition:
+//
+//  - `CollectionStore`  — the catalogues, element addressing, collection lifecycle
+//  - `ElementFormModel` / `GroupFormModel` — what the user has typed into the two forms
+//  - `ToastCenter`      — the message stack
+//  - `Clipboard`        — pasteboard writes and the concealed-copy expiry
+//  - `NBDeeplinkScheme` — scheme normalisation, validation, URL building
+//
+//  The line is drawn at UX: those types hold state and rules, this one decides what the
+//  user sees happen. `workspace`, `collections` and friends stay here as facades so the
+//  read-modify-write call sites throughout keep reading the way they always have.
 //
 
 import Foundation
 import Observation
 import SwiftUI
 import os
-#if canImport(AppKit)
-import AppKit
-#endif
 
 private let deeplinkLog = Logger(subsystem: "flourix.notchboard", category: "deeplink")
 
@@ -25,6 +34,13 @@ enum NotchboardPanelView: Equatable {
 
 @Observable
 final class NotchboardViewModel {
+    // MARK: Collaborators
+    let store = CollectionStore()
+    let elementForm = ElementFormModel()
+    let groupForm = GroupFormModel()
+    let toastCenter = ToastCenter()
+    @ObservationIgnored private let clipboard = Clipboard()
+
     // MARK: Chrome
     var isExpanded: Bool = true
     var showCoachMark: Bool = false
@@ -33,44 +49,11 @@ final class NotchboardViewModel {
     /// unexplained 28pt notch was the only thing a Simulator-less onboarder ever saw.
     var pendingCoachMark: Bool = false
 
-    // MARK: Data
-    /// Every catalogue this Mac holds — Postman-style collections (vision.md §14). Never
-    /// empty: deletion refuses to remove the last one and restore falls back to seed data.
-    var collections: [NBCollection]
-    /// Which collection the panel is showing. Everything single-catalogue below resolves
-    /// through it.
-    var activeCollectionID: String
-
     // MARK: Identity (vision.md §14.2 — the standing prerequisite for any future sync)
-    /// Stable local member id: what this user's claims are attributed to. Persisted
-    /// across launches (vision.md §14.2).
+    /// Stable local member id: what this user's claims are attributed to.
     var selfMemberID: String = UUID().uuidString
     /// The onboarding display name. Labels this user's claims; empty falls back to "you".
     var selfName: String = ""
-
-    /// The collection everything single-catalogue routes through. Falls back to the first
-    /// one so a stale id degrades gracefully instead of trapping (same posture as
-    /// `activeGroup`).
-    var activeCollection: NBCollection {
-        collections.first { $0.id == activeCollectionID }
-            ?? collections.first
-            ?? NBCollection(workspace: NBWorkspace(name: "", groupOrder: [], groups: [:], members: [:]))
-    }
-
-    private var activeCollectionIndex: Int? {
-        collections.firstIndex { $0.id == activeCollectionID } ?? (collections.isEmpty ? nil : 0)
-    }
-
-    /// The active catalogue. A computed facade over `collections`, so the three dozen
-    /// existing call sites — every one already a read-modify-write — kept compiling
-    /// unchanged when one workspace became many.
-    var workspace: NBWorkspace {
-        get { activeCollection.workspace }
-        set {
-            guard let index = activeCollectionIndex else { return }
-            collections[index].workspace = newValue
-        }
-    }
 
     // MARK: Navigation / filters
     var activeGroupID: String = "users"
@@ -90,45 +73,12 @@ final class NotchboardViewModel {
     /// notification fires. In-memory only — a watch doesn't outlive the session.
     @ObservationIgnored private var watchedElementIDs: Set<String> = []
 
-    // MARK: Add/edit-element form
-    /// Non-nil while the add form is editing an existing element instead of creating one.
-    var editingElementID: String?
-    var addName: String = ""
-    /// Multi-select: an element can live in several environments at once (see
-    /// `NBElement.environments`). Never contains `.all`, and never empty when saving.
-    var addEnvironments: Set<NBEnvironment> = [.dev]
-    var addNote: String = ""
-    var addValues: [String: String] = [:]
-
-    // MARK: New/edit-group form
-    /// Non-nil while the group form is editing an existing group instead of creating one.
-    var editingGroupID: String?
-    var newGroupName: String = ""
-    var newGroupFields: [NBField] = [
-        NBField(key: "name", label: "name", type: .text),
-        NBField(key: "value", label: "value", type: .text),
-    ]
-
-    // MARK: Toasts
-    var toasts: [NBToast] = []
-
     // MARK: Settings (mirrors the prototype's configurable props)
     /// Allowed auto-release window — the single definition shared by the Settings stepper
     /// and the restore-time clamp.
     static let autoReleaseRange = 5...240
     var autoReleaseMinutes: Int = 60
     var startExpanded: Bool = true
-    /// The target app's debug URL scheme for "login on sim" — e.g. "brewly" fires
-    /// brewly://debug/login?user=…. Per collection since Phase 2: each catalogue describes
-    /// one app, so switching collections switches the app you deeplink into. Empty means
-    /// the bridge is unconfigured for this collection.
-    var deeplinkScheme: String {
-        get { activeCollection.deeplinkScheme }
-        set {
-            guard let index = activeCollectionIndex else { return }
-            collections[index].deeplinkScheme = newValue
-        }
-    }
     /// Which edge of the Simulator window the notch/panel docks to.
     var dockEdge: NBDockEdge = .right
     /// Set once the user ticks "don't warn me again" in the production-mixing dialog.
@@ -139,8 +89,8 @@ final class NotchboardViewModel {
     /// See NBHotKeyModifier for the full tradeoff.
     var hotKeyModifier: NBHotKeyModifier = .control
 
-    // MARK: Global shortcuts (⌘K / ⌘N — see AppDelegate's global NSEvent monitor)
-    /// Bumped whenever the global ⌘K shortcut fires; the search field observes this and
+    // MARK: Global shortcuts (see AppDelegate's Carbon registration)
+    /// Bumped whenever the global search shortcut fires; the search field observes this and
     /// grabs focus. A counter (rather than a bool) so repeated presses always re-trigger it.
     var searchFocusToken: Int = 0
 
@@ -149,9 +99,6 @@ final class NotchboardViewModel {
     @ObservationIgnored private var autoReleaseTimer: Timer?
 
     init() {
-        let seed = NBCollection(workspace: MockData.workspace())
-        collections = [seed]
-        activeCollectionID = seed.id
         autoReleaseTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.releaseExpiredClaims()
         }
@@ -160,6 +107,40 @@ final class NotchboardViewModel {
     deinit {
         autoReleaseTimer?.invalidate()
     }
+
+    // MARK: - Facades over the store
+    //
+    // Kept on the view model because they are how the whole app refers to its data; the
+    // logic behind them lives in CollectionStore.
+
+    var collections: [NBCollection] {
+        get { store.collections }
+        set { store.collections = newValue }
+    }
+
+    var activeCollectionID: String {
+        get { store.activeCollectionID }
+        set { store.activeCollectionID = newValue }
+    }
+
+    var activeCollection: NBCollection { store.active }
+
+    var workspace: NBWorkspace {
+        get { store.workspace }
+        set { store.workspace = newValue }
+    }
+
+    /// The target app's debug URL scheme for "login on sim". Per collection: switching
+    /// collections switches the app you deeplink into. Empty means the bridge is
+    /// unconfigured for this collection.
+    var deeplinkScheme: String {
+        get { store.deeplinkScheme }
+        set { store.deeplinkScheme = newValue }
+    }
+
+    var toasts: [NBToast] { toastCenter.items }
+
+    // MARK: - Persistence
 
     /// Builds a snapshot of everything worth persisting between launches.
     func persistableState(onboardingCompleted: Bool, onboardingName: String) -> PersistedAppState {
@@ -178,33 +159,19 @@ final class NotchboardViewModel {
         )
     }
 
-    /// Restores settings + data from a previous session (called once at launch).
-    /// Persisted state is user-editable JSON on disk, so it's sanitised here rather than
-    /// trusted: `groupOrder`/`groups` are reconciled, and an unusable workspace falls back
-    /// to fresh seed data instead of stranding (or crashing) the UI.
+    /// Restores settings + data from a previous session (called once at launch). Persisted
+    /// state is user-editable JSON on disk, so the store sanitises it rather than trusting
+    /// it.
     func restore(from persisted: PersistedAppState) {
         selfMemberID = persisted.memberID
         selfName = persisted.onboardingName
 
-        var restored = persisted.collections
-        var orphaned = 0
-        for index in restored.indices {
-            restored[index].workspace.reconcileGroupOrder()
-            // A claim by someone absent from `members` can never be released through the UI,
-            // so it would lock the row and inflate the notch badge permanently. Heal on load.
-            orphaned += restored[index].workspace.releaseOrphanedClaims(ownedBy: [selfMemberID])
-        }
-        // A collection with no groups at all can't hold or accept anything — same fallback
-        // the single-workspace restore had, generalised.
-        restored.removeAll { $0.workspace.groups.isEmpty }
-        if restored.isEmpty {
-            restored = [NBCollection(workspace: MockData.workspace())]
-        }
+        let orphaned = store.adoptPersisted(
+            persisted.collections,
+            activeID: persisted.activeCollectionID,
+            selfMemberID: selfMemberID
+        )
 
-        collections = restored
-        activeCollectionID = restored.contains { $0.id == persisted.activeCollectionID }
-            ? persisted.activeCollectionID
-            : restored[0].id
         if workspace.groups[activeGroupID] == nil {
             activeGroupID = workspace.groupOrder.first ?? ""
         }
@@ -244,8 +211,8 @@ final class NotchboardViewModel {
     }
 
     /// True when this catalogue has no other members, which is the normal case: Notchboard
-    /// works alone and there is no backend to populate a team. Drives hiding the UI that only
-    /// makes sense against a teammate's claim.
+    /// works alone and there is no backend to populate a team. Drives hiding the UI that
+    /// only makes sense against someone else's in-use mark.
     var isSolo: Bool { workspace.members.isEmpty }
 
     var claimedCount: Int {
@@ -286,7 +253,7 @@ final class NotchboardViewModel {
         claim.who == selfMemberID
     }
 
-    /// How the local user's claims are labelled: the onboarding first name, lowercase to
+    /// How the local user's marks are labelled: the onboarding first name, lowercase to
     /// match the row typography, with "you" as the fallback while no name is set. This is
     /// the promise the identity step makes ("● ahmed") finally being kept.
     var selfClaimLabel: String {
@@ -326,69 +293,34 @@ final class NotchboardViewModel {
         // button) must not wipe what the user has typed. A fresh form is only set up when
         // coming from anywhere else — including an in-progress edit, whose values must
         // never leak into a new element.
-        if currentView == .add && editingElementID == nil { return }
-        editingElementID = nil
-        addName = ""
-        addValues = [:]
-        addNote = ""
-        addEnvironments = [.dev]
+        if currentView == .add && !elementForm.isEditing { return }
+        elementForm.reset()
         currentView = .add
     }
 
     /// Opens the element form prefilled for editing — same form as `openAdd`, save updates
     /// in place instead of creating.
     func openEdit(_ element: NBElement) {
-        editingElementID = element.id
-        addName = element.name
-        // Preserve the element's environments exactly rather than coercing — saveElement
-        // writes this back, so a coercion here would silently move any element edited for
-        // an unrelated reason. An element with none (hand-edited file) opens as dev so the
-        // form is never in an unsaveable state.
-        addEnvironments = element.environments.isEmpty ? [.dev] : element.environments
-        addNote = element.note
-        addValues = element.values
+        elementForm.prefill(from: element)
         currentView = .add
     }
 
-    // MARK: - Actions: environment selection
-
-    /// Adds or removes an environment in the add/edit form, refusing to leave the element
-    /// with none (an element that belongs nowhere can never be found by the filter).
+    /// Adds or removes an environment in the element form, explaining the one refusal.
     func toggleAddEnvironment(_ env: NBEnvironment) {
-        guard env != .all else { return }
-        if addEnvironments.contains(env) {
-            guard addEnvironments.count > 1 else {
-                toast("an element needs at least one environment", color: .red)
-                return
-            }
-            addEnvironments.remove(env)
-        } else {
-            addEnvironments.insert(env)
+        if !elementForm.toggleEnvironment(env), elementForm.environments.contains(env) {
+            toast("an element needs at least one environment", color: .red)
         }
     }
 
-    /// True when toggling `env` would mix production with another environment and the user
-    /// hasn't silenced the warning. The view shows the dialog, then calls
-    /// `toggleAddEnvironment` — keeping the decision here and the AppKit modal there makes
-    /// this testable without a window.
+    /// True when toggling `env` needs the production-mixing warning — the form knows the
+    /// combination, the view model knows whether the user has silenced it.
     func productionMixWarningNeeded(togglingOn env: NBEnvironment) -> Bool {
-        guard !suppressProductionMixWarning, env != .all else { return false }
-        var candidate = addEnvironments
-        if candidate.contains(env) {
-            candidate.remove(env)
-        } else {
-            candidate.insert(env)
-        }
-        return candidate.contains(.prd) && candidate.count > 1
+        guard !suppressProductionMixWarning else { return false }
+        return elementForm.wouldMixProduction(togglingOn: env)
     }
 
     func openNewGroup() {
-        editingGroupID = nil
-        newGroupName = ""
-        newGroupFields = [
-            NBField(key: "name", label: "name", type: .text),
-            NBField(key: "value", label: "value", type: .text),
-        ]
+        groupForm.reset()
         currentView = .newGroup
     }
 
@@ -396,9 +328,7 @@ final class NotchboardViewModel {
     func openEditGroup() {
         let group = activeGroup
         guard !group.id.isEmpty else { return }
-        editingGroupID = group.id
-        newGroupName = group.label
-        newGroupFields = group.fields
+        groupForm.prefill(from: group)
         currentView = .newGroup
     }
 
@@ -472,7 +402,7 @@ final class NotchboardViewModel {
     // MARK: - Actions: element mutation
 
     func toggleFavorite(_ elementID: String) {
-        mutate(elementID) { $0.isFavorite.toggle() }
+        store.mutate(elementID, in: activeGroupID) { $0.isFavorite.toggle() }
     }
 
     func claimOrRelease(_ elementID: String) {
@@ -487,8 +417,9 @@ final class NotchboardViewModel {
                 didFreeElement(group.elements[idx])
                 toast("released “\(element.name)”", color: .green)
             } else {
-                // Deliberately does not release it — taking someone's element out from under
-                // them shouldn't be a single misclick. `takeOver` is the explicit path.
+                // Deliberately does not release it — taking someone's element out from
+                // under them shouldn't be a single misclick. `takeOver` is the explicit
+                // path.
                 toast("\(memberName(claim.who)) marked this in use — take it over from the detail view", color: .amber)
             }
         } else {
@@ -501,15 +432,14 @@ final class NotchboardViewModel {
 
     /// Takes an element marked in use by someone else.
     ///
-    /// Without a backend there is nobody on the other end to release it, so a foreign claim
-    /// is otherwise permanent: `claimOrRelease` refuses it and the auto-release sweep skips
-    /// it. That left rows locked forever — the seed data used to ship three of them. A
-    /// deliberate, explicitly-labelled takeover is the honest escape hatch, and it is what
-    /// the old "ping them or claim anyway" copy promised without ever delivering it.
+    /// Without a backend there is nobody on the other end to release it, so someone else's
+    /// mark is otherwise permanent: `claimOrRelease` refuses it and the auto-release sweep
+    /// skips it. That left rows locked forever — the seed data used to ship three of them.
+    /// A deliberate, explicitly-labelled takeover is the honest escape hatch.
     func takeOver(_ elementID: String) {
         guard let element = selectedElement(id: elementID), let claim = element.claimedBy, !isMine(claim) else { return }
         let previous = memberName(claim.who)
-        mutate(elementID) {
+        store.mutate(elementID, in: activeGroupID) {
             $0.claimedBy = NBClaim(who: selfMemberID)
             $0.lastUsed = "just now, by \(selfClaimLabel)"
         }
@@ -534,7 +464,7 @@ final class NotchboardViewModel {
         toast("you'll be pinged when “\(element.name)” is free", color: .green)
     }
 
-    /// Called whenever an element's claim is cleared (manual release or auto-release). If it
+    /// Called whenever an element's mark is cleared (manual release or auto-release). If it
     /// was being watched, fire a local notification and drop the watch.
     private func didFreeElement(_ element: NBElement) {
         guard watchedElementIDs.remove(element.id) != nil else { return }
@@ -542,42 +472,13 @@ final class NotchboardViewModel {
         toast("“\(element.name)” is now free", color: .green)
     }
 
-    /// Clears a concealed copy off the pasteboard after this window, unless the user has
-    /// copied something else since. The concealed-type hint only protects against
-    /// cooperating clipboard managers; the plaintext itself would otherwise sit on the
-    /// general pasteboard indefinitely.
-    private static let concealedPasteboardLifetime: Duration = .seconds(60)
-    @ObservationIgnored private var pasteboardClearTask: Task<Void, Never>?
-
     func copy(_ text: String, label: String, concealed: Bool = false) {
-        #if canImport(AppKit)
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        if concealed {
-            // Standard hint (nspasteboard.org) telling clipboard managers not to record
-            // this entry — used for secret-typed field values.
-            pasteboard.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-
-            let changeCount = pasteboard.changeCount
-            pasteboardClearTask?.cancel()
-            pasteboardClearTask = Task {
-                try? await Task.sleep(for: Self.concealedPasteboardLifetime)
-                guard !Task.isCancelled else { return }
-                let current = NSPasteboard.general
-                // Only clear if our copy is still the pasteboard's content — never wipe
-                // something the user copied afterwards.
-                if current.changeCount == changeCount {
-                    current.clearContents()
-                }
-            }
-        }
-        #endif
+        clipboard.copy(text, concealed: concealed)
         toast("\(label) copied to clipboard", color: .amber)
     }
 
     /// Copies an element's primary (first schema) field — the row copy button and the
-    /// claim-and-copy flow share this so the "what is primary" logic lives in one place.
+    /// copy-and-mark flow share this so the "what is primary" logic lives in one place.
     func copyPrimaryField(of element: NBElement) {
         let field = activeGroup.fields.first
         copy(
@@ -607,35 +508,39 @@ final class NotchboardViewModel {
     }
 
     /// True when an element carries enough to be treated as an auth credential — a username
-    /// plus a secret. Drives the auth-specific buttons (deeplink + copy-and-claim).
+    /// plus a secret. Drives the auth-specific buttons (deeplink + copy-and-mark).
     func isAuthElement(_ element: NBElement) -> Bool {
         loginUsername(for: element) != nil && loginPassword(for: element) != nil
     }
 
-    /// The configured scheme, normalized: strips a pasted "://" and trailing ":" / "/" /
-    /// "." / whitespace, so "mythos", "mythos.", "mythos://" and "mythos:" all resolve to
-    /// "mythos". A stray trailing dot silently produced an unhandled URL scheme.
+    /// The configured scheme, normalised (see NBDeeplinkScheme).
     var resolvedDeeplinkScheme: String {
-        var scheme = deeplinkScheme.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let separator = scheme.range(of: "://") {
-            scheme = String(scheme[..<separator.lowerBound])
-        }
-        return scheme.trimmingCharacters(in: CharacterSet(charactersIn: ":/. "))
+        NBDeeplinkScheme.resolve(deeplinkScheme)
     }
 
-    /// Network schemes that would turn the credential deeplink into a web request. A user
-    /// pasting their app's universal link ("https://app.example.com") into Settings must
-    /// not end up firing username+password as GET parameters at a real host.
-    private static let networkSchemes: Set<String> = ["http", "https", "ftp", "file", "ws", "wss"]
-
-    /// True when `scheme` matches the URL-scheme grammar (letter, then letters/digits/
-    /// "+"/"-"/".") and is not a network scheme.
     static func isValidDeeplinkScheme(_ scheme: String) -> Bool {
-        guard !networkSchemes.contains(scheme.lowercased()) else { return false }
-        guard let first = scheme.first, first.isASCII, first.isLetter else { return false }
-        return scheme.allSatisfy { character in
-            character.isASCII && (character.isLetter || character.isNumber || character == "+" || character == "-" || character == ".")
+        NBDeeplinkScheme.isValid(scheme)
+    }
+
+    /// Sets the active collection's deeplink scheme, validating it the same way
+    /// `loginOnSim` does so a bad value is refused where it's typed rather than at the
+    /// moment someone needs the feature to work.
+    func setDeeplinkScheme(_ raw: String) {
+        let resolved = NBDeeplinkScheme.resolve(raw)
+        guard !resolved.isEmpty else {
+            // Store the resolved (empty) value, not the raw whitespace the user typed —
+            // "  " is not a scheme, and leaving it there makes `isEmpty` checks lie.
+            deeplinkScheme = ""
+            toast("deeplink scheme cleared — “login on sim” is off for “\(workspace.name)”", color: .amber)
+            return
         }
+        guard NBDeeplinkScheme.isValid(resolved) else {
+            deeplinkScheme = ""
+            toast("“\(resolved)” isn't a custom URL scheme — use your app's debug scheme, e.g. notchdemo", color: .red)
+            return
+        }
+        deeplinkScheme = resolved
+        toast("“\(workspace.name)” now deeplinks into \(resolved)://", color: .green)
     }
 
     /// Injection point for tests — fires the deeplink into the simulator. Production uses
@@ -649,44 +554,37 @@ final class NotchboardViewModel {
         }
         let scheme = resolvedDeeplinkScheme
         guard !scheme.isEmpty else {
-            deeplinkLog.error("login on sim: no debug URL scheme configured in settings")
-            toast("set your app's debug URL scheme in settings first", color: .red)
+            deeplinkLog.error("login on sim: no debug URL scheme configured for this collection")
+            toast("set this collection's debug URL scheme first — the ▾ menu by its name", color: .red)
             return
         }
-        guard Self.isValidDeeplinkScheme(scheme) else {
+        guard NBDeeplinkScheme.isValid(scheme) else {
             deeplinkLog.error("login on sim: “\(scheme, privacy: .public)” is not a usable custom scheme")
-            toast("“\(scheme)” isn't a custom URL scheme — set your app's debug scheme in settings", color: .red)
+            toast("“\(scheme)” isn't a custom URL scheme — set your app's debug scheme", color: .red)
             return
         }
-        deeplinkLog.log("login on sim: firing \(scheme, privacy: .public)://debug/login for “\(element.name, privacy: .public)” (password \(self.loginPassword(for: element) != nil ? "included" : "absent", privacy: .public))")
-        guard let encodedUser = username.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return }
-
-        var query = "user=\(encodedUser)"
-        // Pass the password too when the element has one, so the target app can fill both
-        // fields. Username-only apps simply ignore the extra param.
-        if let password = loginPassword(for: element),
-           let encodedPass = password.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
-            query += "&pass=\(encodedPass)"
-        }
+        let password = loginPassword(for: element)
+        deeplinkLog.log("login on sim: firing \(scheme, privacy: .public)://debug/login for “\(element.name, privacy: .public)” (password \(password != nil ? "included" : "absent", privacy: .public))")
+        guard let url = NBDeeplinkScheme.debugLoginURL(scheme: scheme, username: username, password: password) else { return }
 
         // Capture the element's owning group AND collection now: the simctl round-trip
         // takes ~0.5-2s, and resolving through the active ids at callback time silently
-        // dropped the auto-claim whenever the user switched tabs — or, since Phase 2,
-        // collections — mid-flight (while still toasting success).
+        // dropped the auto-mark whenever the user switched tabs — or collections —
+        // mid-flight (while still toasting success).
         guard let owningGroupID = resolvedActiveGroupID else { return }
         let owningCollectionID = activeCollectionID
         let wasFree = element.claimedBy == nil
-        deeplinkOpener("\(scheme)://debug/login?\(query)") { [weak self] failure in
+        deeplinkOpener(url) { [weak self] failure in
             guard let self else { return }
             if let failure {
-                // The deeplink never fired — don't leave the element falsely claimed.
+                // The deeplink never fired — don't leave the element falsely marked.
                 self.toast(failure.userMessage, color: .red)
                 return
             }
-            // Logging in as this account is de facto using it — auto-claim if it was free
+            // Logging in as this account is de facto using it — auto-mark if it was free
             // (vision §5.3), but only now that the deeplink actually succeeded.
-            if wasFree, self.element(element.id, group: owningGroupID, collection: owningCollectionID)?.claimedBy == nil {
-                self.mutate(element.id, group: owningGroupID, collection: owningCollectionID) {
+            if wasFree, self.store.element(element.id, group: owningGroupID, collection: owningCollectionID)?.claimedBy == nil {
+                self.store.mutate(element.id, group: owningGroupID, collection: owningCollectionID) {
                     $0.claimedBy = NBClaim(who: self.selfMemberID)
                     $0.lastUsed = "just now, by \(self.selfClaimLabel)"
                 }
@@ -696,23 +594,20 @@ final class NotchboardViewModel {
     }
 
     /// Copies an auth element's login and password to the clipboard (concealed) and marks
-    /// the element as in use. This is the fallback for logins the deeplink can't drive —
+    /// the element in use. This is the fallback for logins the deeplink can't drive —
     /// WebView/SSO screens (Okta and the like) — where the user pastes the credentials by
-    /// hand but still wants the element claimed so teammates don't collide. Release is the
-    /// normal manual claim/release action.
+    /// hand but still wants the element marked so teammates don't collide.
     func copyAuthAndClaim(_ element: NBElement) {
         let login = loginUsername(for: element) ?? element.name
-        let clipboard: String
         if let password = loginPassword(for: element) {
-            clipboard = "\(login)\n\(password)"
-            copy(clipboard, label: "login + password", concealed: true)
+            copy("\(login)\n\(password)", label: "login + password", concealed: true)
         } else {
             copy(login, label: "login")
         }
 
         switch selectedElement(id: element.id)?.claimedBy {
         case nil:
-            mutate(element.id) {
+            store.mutate(element.id, in: activeGroupID) {
                 $0.claimedBy = NBClaim(who: selfMemberID)
                 $0.lastUsed = "just now, by \(selfClaimLabel)"
             }
@@ -728,18 +623,17 @@ final class NotchboardViewModel {
     /// waiting on the 30s timer.
     func releaseExpiredClaims() {
         let limit = autoReleaseMinutes
-        // Sweeps every collection, not just the visible one — your idle claim in a
-        // background collection ages exactly the same way (plan note: "releaseExpiredClaims
-        // must sweep all collections").
+        // Sweeps every collection, not just the visible one — your idle mark in a
+        // background collection ages exactly the same way.
         for cIndex in collections.indices {
             for groupID in collections[cIndex].workspace.groupOrder {
                 guard var group = collections[cIndex].workspace.groups[groupID] else { continue }
                 var changed = false
                 for idx in group.elements.indices {
-                    // Only auto-release your own idle claims — the manual path already
-                    // refuses to release someone else's, and other members' claim ages are
-                    // simulated/frozen in this local build, so sweeping them would be
-                    // meaningless churn.
+                    // Only auto-release your own idle marks — the manual path already
+                    // refuses to release someone else's, and other members' ages are
+                    // frozen in this local build, so sweeping them would be meaningless
+                    // churn.
                     guard let claim = group.elements[idx].claimedBy,
                           isMine(claim), claim.minutesAgo >= limit else { continue }
                     group.elements[idx].claimedBy = nil
@@ -752,74 +646,23 @@ final class NotchboardViewModel {
         }
     }
 
-    private func mutate(_ elementID: String, _ change: (inout NBElement) -> Void) {
-        mutate(elementID, in: activeGroupID, change)
-    }
-
-    /// Mutates an element inside an explicit group — used by async completions, which must
-    /// address the element's *owning* group rather than whatever group is active by the
-    /// time they fire.
-    private func mutate(_ elementID: String, in groupID: String, _ change: (inout NBElement) -> Void) {
-        guard var group = workspace.groups[groupID],
-              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
-        change(&group.elements[idx])
-        workspace.groups[groupID] = group
-    }
-
-    /// Looks an element up in an explicit group (see `mutate(_:in:_:)` for why).
-    private func element(_ elementID: String, in groupID: String) -> NBElement? {
-        workspace.groups[groupID]?.elements.first { $0.id == elementID }
-    }
-
-    /// Fully-addressed variants for async completions: an element's owning *collection*
-    /// must be captured at fire time too, or a mid-flight collection switch would land the
-    /// mutation in whatever catalogue happens to be active when the callback runs.
-    private func mutate(_ elementID: String, group groupID: String, collection collectionID: String, _ change: (inout NBElement) -> Void) {
-        guard let cIndex = collections.firstIndex(where: { $0.id == collectionID }),
-              var group = collections[cIndex].workspace.groups[groupID],
-              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
-        change(&group.elements[idx])
-        collections[cIndex].workspace.groups[groupID] = group
-    }
-
-    private func element(_ elementID: String, group groupID: String, collection collectionID: String) -> NBElement? {
-        collections.first { $0.id == collectionID }?.workspace.groups[groupID]?.elements.first { $0.id == elementID }
-    }
-
     // MARK: - Actions: add/edit element
 
     func saveElement() {
-        let trimmedName = addName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            toast("give it a display name first", color: .red)
-            return
-        }
-        // The placeholder is in-band with user data in state.json: a field literally
-        // holding it would be mistaken for a stripped secret on the next load and swap in
-        // stale Keychain data (or nothing). Rejecting it at entry is the honest fix.
-        guard !addValues.values.contains(AppStateStore.keychainPlaceholder) else {
-            toast("that value is reserved by notchboard — pick another", color: .red)
-            return
-        }
-        guard !addEnvironments.isEmpty else {
-            toast("pick at least one environment", color: .red)
-            return
-        }
-        // The form's controls make most wrong values hard to type, but values also arrive
-        // from imports and hand-edited files — this is the gate that actually holds.
-        if let problem = NBFieldValidation.firstProblem(in: addValues, fields: activeGroup.fields) {
+        let (trimmedName, trimmedNote, problem) = elementForm.validated(against: activeGroup.fields)
+        if let problem {
             toast(problem, color: .red)
             return
         }
 
-        if let editingID = editingElementID {
-            mutate(editingID) { element in
+        if let editingID = elementForm.editingElementID {
+            store.mutate(editingID, in: activeGroupID) { element in
                 element.name = trimmedName
-                element.environments = addEnvironments
-                element.note = addNote.trimmingCharacters(in: .whitespacesAndNewlines)
-                element.values = addValues
+                element.environments = self.elementForm.environments
+                element.note = trimmedNote
+                element.values = self.elementForm.values
             }
-            editingElementID = nil
+            elementForm.editingElementID = nil
             currentView = .detail(elementID: editingID)
             toast("“\(trimmedName)” updated", color: .green)
             return
@@ -828,36 +671,25 @@ final class NotchboardViewModel {
         // Write through the *resolved* group id: activeGroupID can be stale ("" after the
         // last group was deleted, or a ghost id), and writing activeGroup's fallback
         // contents under that stale key would mint a phantom — or duplicated — group.
-        guard let groupID = resolvedActiveGroupID, var group = workspace.groups[groupID] else {
+        guard let groupID = resolvedActiveGroupID else {
             toast("create a group first", color: .red)
             return
         }
         let element = NBElement(
             id: UUID().uuidString,
-            name: trimmedName, environments: addEnvironments, isFavorite: false, claimedBy: nil,
-            note: addNote.trimmingCharacters(in: .whitespacesAndNewlines),
-            lastUsed: "just now, by \(selfClaimLabel)", values: addValues
+            name: trimmedName, environments: elementForm.environments, isFavorite: false, claimedBy: nil,
+            note: trimmedNote,
+            lastUsed: "just now, by \(selfClaimLabel)", values: elementForm.values
         )
-        group.elements.append(element)
-        workspace.groups[groupID] = group
+        store.appendElement(element, to: groupID)
         currentView = .list
         toast("“\(element.name)” added", color: .green)
     }
 
     func deleteElement(_ elementID: String) {
-        guard var group = workspace.groups[activeGroupID],
-              let idx = group.elements.firstIndex(where: { $0.id == elementID }) else { return }
-        let element = group.elements.remove(at: idx)
-        workspace.groups[activeGroupID] = group
-
-        // The persisted JSON only ever held placeholders; the real secret values live in
-        // the Keychain and must be cleaned up with the element.
-        for key in group.secretFieldKeys {
-            SecretsStore.delete(for: "\(element.id).\(key)")
-        }
+        guard let element = store.deleteElement(elementID, from: activeGroupID) else { return }
         revealedFieldKeys = revealedFieldKeys.filter { !$0.hasPrefix("\(elementID).") }
         watchedElementIDs.remove(elementID)
-
         currentView = .list
         toast("“\(element.name)” deleted", color: .red)
     }
@@ -865,118 +697,68 @@ final class NotchboardViewModel {
     // MARK: - Actions: new/edit group
 
     func addNewGroupField() {
-        newGroupFields.append(NBField(key: "field_\(newGroupFields.count + 1)", label: "field_\(newGroupFields.count + 1)", type: .text))
+        groupForm.addField()
     }
 
     func removeNewGroupField(_ id: UUID) {
-        newGroupFields.removeAll { $0.id == id }
+        groupForm.removeField(id)
     }
 
     func saveGroup() {
-        let name = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = groupForm.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             toast("name the group first", color: .red)
             return
         }
 
-        if let editingID = editingGroupID {
+        if let editingID = groupForm.editingGroupID {
             updateGroup(editingID, name: name)
             return
         }
 
-        let groupID = Self.slug(name)
+        let groupID = GroupFormModel.slug(name)
         guard workspace.groups[groupID] == nil else {
             toast("group already exists", color: .red)
             return
         }
-        let fields = Self.normalisedFields(newGroupFields)
+        let fields = GroupFormModel.normalisedFields(groupForm.fields)
         guard let firstField = fields.first else {
             toast("add at least one field", color: .red)
             return
         }
-        let group = NBGroup(
+        store.addGroup(NBGroup(
             id: groupID, label: name.lowercased(),
-            singular: Self.singularise(name),
+            singular: GroupFormModel.singularise(name),
             secondaryKey: firstField.key, fields: fields, elements: []
-        )
-        workspace.groups[groupID] = group
-        workspace.groupOrder.append(groupID)
+        ))
         activeGroupID = groupID
         currentView = .list
         toast("group “\(name)” created", color: .green)
     }
 
-    /// Applies the group form to an existing group. Fields that already existed (matched by
-    /// their stable `NBField.id`) keep their `key`, so element values survive a relabel;
-    /// only newly added fields derive a key from their label. Values (and Keychain secrets)
-    /// of removed fields are dropped.
+    /// Applies the edited schema (the store handles value preservation and Keychain
+    /// cleanup) and returns to the list.
     private func updateGroup(_ groupID: String, name: String) {
-        guard var group = workspace.groups[groupID] else { return }
-
-        let existingByID = Dictionary(uniqueKeysWithValues: group.fields.map { ($0.id, $0) })
-        let fields = Self.normalisedFields(newGroupFields, existingByID: existingByID)
-        guard let firstField = fields.first else {
+        guard store.applySchema(to: groupID, name: name, fields: groupForm.fields) else {
             toast("add at least one field", color: .red)
             return
         }
-
-        // A field that was a secret but is no longer one in the new schema — whether it was
-        // removed OR retyped to a non-secret type — must have its value dropped and its
-        // Keychain entry deleted. Otherwise the previously-protected value would survive in
-        // memory and get written to state.json in cleartext on the next save.
-        let keptKeys = Set(fields.map(\.key))
-        let newSecretKeys = Set(fields.filter { $0.type == .secret }.map(\.key))
-        let clearedSecretKeys = Set(group.secretFieldKeys).subtracting(newSecretKeys)
-        for idx in group.elements.indices {
-            group.elements[idx].values = group.elements[idx].values.filter {
-                keptKeys.contains($0.key) && !clearedSecretKeys.contains($0.key)
-            }
-        }
-        for element in group.elements {
-            for key in clearedSecretKeys {
-                SecretsStore.delete(for: "\(element.id).\(key)")
-            }
-        }
-
-        group.label = name.lowercased()
-        group.singular = Self.singularise(name)
-        group.fields = fields
-        group.secondaryKey = firstField.key
-        workspace.groups[groupID] = group
-
-        editingGroupID = nil
+        groupForm.editingGroupID = nil
         currentView = .list
         toast("group “\(name)” updated", color: .green)
     }
 
     func deleteGroup(_ groupID: String) {
-        guard let group = workspace.groups[groupID] else { return }
-        for key in group.secretFieldKeys {
-            for element in group.elements {
-                SecretsStore.delete(for: "\(element.id).\(key)")
-            }
-        }
-        workspace.groups.removeValue(forKey: groupID)
-        workspace.groupOrder.removeAll { $0 == groupID }
+        guard let group = store.deleteGroup(groupID) else { return }
         if activeGroupID == groupID {
             activeGroupID = workspace.groupOrder.first ?? ""
         }
-        editingGroupID = nil
+        groupForm.editingGroupID = nil
         currentView = .list
         toast("group “\(group.label)” deleted", color: .red)
     }
 
     // MARK: - Actions: collections
-
-    /// Element ids across every collection *except* the one identified by `excluding` —
-    /// the seed for cross-collection dedup at each ingestion point (Keychain account keys
-    /// carry no collection component, see NBCollection).
-    private func elementIDs(excluding excludedCollectionID: String? = nil) -> Set<String> {
-        Set(collections.lazy
-            .filter { $0.id != excludedCollectionID }
-            .flatMap { $0.workspace.groups.values }
-            .flatMap { $0.elements.map(\.id) })
-    }
 
     /// Returns the panel to a coherent state after the catalogue under it changed
     /// wholesale (collection switch/delete, import, seed adoption).
@@ -985,16 +767,21 @@ final class NotchboardViewModel {
         searchText = ""
         revealedFieldKeys = []
         keyboardSelectionID = nil
-        editingElementID = nil
-        editingGroupID = nil
+        elementForm.editingElementID = nil
+        groupForm.editingGroupID = nil
         dismissClaimTooltip()
     }
 
-    func switchCollection(_ id: String) {
-        guard id != activeCollectionID, collections.contains(where: { $0.id == id }) else { return }
-        activeCollectionID = id
+    /// Shared tail of every path that swaps the catalogue under the panel.
+    private func settleAfterCatalogueChange() {
         resetTransientUIState()
         activeGroupID = workspace.groupOrder.first ?? ""
+    }
+
+    func switchCollection(_ id: String) {
+        guard id != activeCollectionID, store.contains(id) else { return }
+        activeCollectionID = id
+        settleAfterCatalogueChange()
     }
 
     func createCollection(named name: String) {
@@ -1003,32 +790,9 @@ final class NotchboardViewModel {
             toast("name the collection first", color: .red)
             return
         }
-        let collection = NBCollection(workspace: MockData.emptyWorkspace(name: trimmed))
-        collections.append(collection)
-        switchCollection(collection.id)
+        store.create(named: trimmed)
+        settleAfterCatalogueChange()
         toast("“\(trimmed)” created — \(hotKeyModifier.symbolPrefix)N adds your first element", color: .green)
-    }
-
-    /// Sets the active collection's deeplink scheme, validating it the same way
-    /// `loginOnSim` does so a bad value is refused where it's typed rather than at the
-    /// moment someone needs the feature to work.
-    func setDeeplinkScheme(_ raw: String) {
-        deeplinkScheme = raw
-        let resolved = resolvedDeeplinkScheme
-        guard !resolved.isEmpty else {
-            // Store the resolved (empty) value, not the raw whitespace the user typed —
-            // "  " is not a scheme, and leaving it there makes `isEmpty` checks lie.
-            deeplinkScheme = ""
-            toast("deeplink scheme cleared — “login on sim” is off for “\(workspace.name)”", color: .amber)
-            return
-        }
-        guard Self.isValidDeeplinkScheme(resolved) else {
-            deeplinkScheme = ""
-            toast("“\(resolved)” isn't a custom URL scheme — use your app's debug scheme, e.g. notchdemo", color: .red)
-            return
-        }
-        deeplinkScheme = resolved
-        toast("“\(workspace.name)” now deeplinks into \(resolved)://", color: .green)
     }
 
     func renameActiveCollection(to name: String) {
@@ -1041,36 +805,19 @@ final class NotchboardViewModel {
         toast("renamed to “\(trimmed)”", color: .green)
     }
 
-    /// Duplicates the active collection. Every element in the copy gets a fresh id (they
-    /// all collide with the source by definition), so the copy's secrets land under their
-    /// own Keychain keys on the next save instead of aliasing the original's.
     func duplicateActiveCollection() {
-        var seen = elementIDs()
-        var copyWorkspace = activeCollection.workspace
-        copyWorkspace.name += " copy"
-        copyWorkspace.deduplicateElementIDs(seen: &seen)
-        let copy = NBCollection(deeplinkScheme: activeCollection.deeplinkScheme, workspace: copyWorkspace)
-        collections.append(copy)
-        switchCollection(copy.id)
-        toast("duplicated as “\(copyWorkspace.name)”", color: .green)
+        let copy = store.duplicateActive()
+        settleAfterCatalogueChange()
+        toast("duplicated as “\(copy.name)”", color: .green)
     }
 
-    /// Deletes the active collection and its Keychain secrets. Refuses to delete the last
-    /// one — the panel with zero collections is not a state anything else handles.
     func deleteActiveCollection() {
-        guard collections.count > 1 else {
+        guard let deleted = store.deleteActive() else {
             toast("this is the only collection — create another before deleting it", color: .red)
             return
         }
-        let doomed = activeCollection
-        for key in doomed.workspace.allSecretKeychainKeys {
-            SecretsStore.delete(for: key)
-        }
-        collections.removeAll { $0.id == doomed.id }
-        activeCollectionID = collections[0].id
-        resetTransientUIState()
-        activeGroupID = workspace.groupOrder.first ?? ""
-        toast("collection “\(doomed.name)” deleted", color: .red)
+        settleAfterCatalogueChange()
+        toast("collection “\(deleted.name)” deleted", color: .red)
     }
 
     // MARK: - Actions: import/export
@@ -1081,115 +828,44 @@ final class NotchboardViewModel {
     /// values are force-blanked there, real ones only enter via the encrypted envelope, and
     /// claims are stripped — so what arrives here is adopted as-is.
     func replaceActiveCollection(with imported: NBWorkspace) {
-        adopt(imported)
+        store.replaceActive(with: imported)
+        settleAfterCatalogueChange()
+        // Watches on the discarded catalogue's elements can never fire — drop only those.
+        watchedElementIDs = watchedElementIDs.intersection(store.elementIDs())
         toast("imported “\(workspace.name)” · \(workspace.elementCount) elements", color: .green)
     }
 
     /// Imports as a new collection alongside the existing ones — the menu path. Nothing is
     /// destroyed. Same trust posture as `replaceActiveCollection`.
     func addCollection(_ imported: NBWorkspace, deeplinkScheme: String = "") {
-        var clean = imported
-        clean.reconcileGroupOrder()
-        var seen = elementIDs()
-        clean.deduplicateElementIDs(seen: &seen)
-        let collection = NBCollection(deeplinkScheme: deeplinkScheme, workspace: clean)
-        collections.append(collection)
-        activeCollectionID = collection.id
-        resetTransientUIState()
-        activeGroupID = clean.groupOrder.first ?? ""
-        toast("imported “\(clean.name)” · \(clean.elementCount) elements", color: .green)
+        let added = store.add(imported, deeplinkScheme: deeplinkScheme)
+        settleAfterCatalogueChange()
+        toast("imported “\(added.name)” · \(added.workspace.elementCount) elements", color: .green)
     }
 
     /// Adopts a freshly-seeded catalogue (onboarding's "sample" and "empty" starting
-    /// points). Shares `adopt` with the import-replace path so the reset behaviour can't
-    /// drift.
+    /// points). Shares the replace path so the reset behaviour can't drift.
     func adoptSeedWorkspace(_ seeded: NBWorkspace) {
-        adopt(seeded)
+        store.replaceActive(with: seeded)
+        settleAfterCatalogueChange()
+        watchedElementIDs = watchedElementIDs.intersection(store.elementIDs())
     }
 
     /// Replaces every collection from a decrypted snapshot — the §14.5.2 recovery path.
-    /// Whole-app-wide on purpose: a snapshot is a consistent moment in time, and restoring
-    /// half of one would manufacture exactly the inconsistency it exists to undo.
     func restoreCollections(_ incoming: [NBCollection], activeID: String) {
-        guard !incoming.isEmpty else {
+        guard store.restore(incoming, activeID: activeID) else {
             toast("that snapshot is empty — nothing restored", color: .red)
             return
         }
-        for key in collections.allSecretKeychainKeys {
-            SecretsStore.delete(for: key)
-        }
-        var restored = incoming
-        for index in restored.indices {
-            restored[index].workspace.reconcileGroupOrder()
-        }
-        restored.deduplicateElementIDsAcrossCollections()
-        collections = restored
-        activeCollectionID = restored.contains { $0.id == activeID } ? activeID : restored[0].id
-        resetTransientUIState()
-        activeGroupID = workspace.groupOrder.first ?? ""
+        settleAfterCatalogueChange()
         watchedElementIDs = []
-        toast("restored \(restored.count) collection\(restored.count == 1 ? "" : "s") from snapshot", color: .green)
-    }
-
-    /// Swaps the active collection's catalogue and returns the UI to a coherent state.
-    /// Purges the outgoing catalogue's Keychain entries — nothing else references them
-    /// once it's gone.
-    private func adopt(_ incoming: NBWorkspace) {
-        for key in workspace.allSecretKeychainKeys {
-            SecretsStore.delete(for: key)
-        }
-
-        var clean = incoming
-        clean.reconcileGroupOrder()
-        // Duplicate element IDs — within the incoming file or against the *other*
-        // collections — would collide in the Keychain and make row actions hit the wrong
-        // element. Remap before adopting.
-        var seen = elementIDs(excluding: activeCollectionID)
-        clean.deduplicateElementIDs(seen: &seen)
-        workspace = clean
-        activeGroupID = clean.groupOrder.first ?? ""
-        resetTransientUIState()
-        // Watches on the discarded catalogue's elements can never fire — drop only those.
-        let remaining = elementIDs()
-        watchedElementIDs = watchedElementIDs.intersection(remaining)
-    }
-
-    /// Drops empty-labelled fields, derives keys (preserving the stable key of any field
-    /// that already existed, matched by `NBField.id`), and dedupes colliding keys with a
-    /// trailing underscore. Shared by the create and edit paths — they previously diverged,
-    /// and the create path let "user id" and "user-id" silently share one values slot.
-    static func normalisedFields(_ raw: [NBField], existingByID: [UUID: NBField] = [:]) -> [NBField] {
-        var usedKeys = Set<String>()
-        var fields: [NBField] = []
-        for field in raw where !field.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            var f = field
-            f.key = existingByID[field.id]?.key ?? Self.slug(field.label)
-            while usedKeys.contains(f.key) { f.key += "_" }
-            usedKeys.insert(f.key)
-            fields.append(f)
-        }
-        return fields
-    }
-
-    private static func slug(_ text: String) -> String {
-        text.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "_", options: .regularExpression)
-    }
-
-    private static func singularise(_ name: String) -> String {
-        let lowered = name.lowercased()
-        return lowered.hasSuffix("s") ? String(lowered.dropLast()) : lowered
+        toast("restored \(collections.count) collection\(collections.count == 1 ? "" : "s") from snapshot", color: .green)
     }
 
     // MARK: - Toasts
 
     func toast(_ message: String, color: NBToastColor) {
-        let item = NBToast(id: UUID(), message: message, color: color)
-        toasts.append(item)
-        if toasts.count > 4 { toasts.removeFirst(toasts.count - 4) }
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 2_800_000_000)
-            self?.toasts.removeAll { $0.id == item.id }
-        }
+        toastCenter.post(message, color: color)
     }
 
     // MARK: - Onboarding replay
@@ -1203,26 +879,8 @@ final class NotchboardViewModel {
     }
 }
 
-struct NBToast: Identifiable, Equatable {
-    let id: UUID
-    let message: String
-    let color: NBToastColor
-}
-
 private extension Int {
     func clamped(to range: ClosedRange<Int>) -> Int {
         Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
-    }
-}
-
-enum NBToastColor {
-    case amber, green, red
-
-    var color: Color {
-        switch self {
-        case .amber: return NBColor.amber
-        case .green: return NBColor.green
-        case .red: return NBColor.red
-        }
     }
 }

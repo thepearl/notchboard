@@ -106,8 +106,8 @@ struct FieldValidationTests {
         vm.selectGroup("products") // has a number field (price) and a picker (tier)
         let before = vm.activeGroup.elements.count
         vm.openAdd()
-        vm.addName = "bad price"
-        vm.addValues["price"] = "free"
+        vm.elementForm.name = "bad price"
+        vm.elementForm.values["price"] = "free"
         vm.saveElement()
         #expect(vm.activeGroup.elements.count == before, "an unparseable number must not reach the catalogue")
     }
@@ -145,13 +145,13 @@ struct EnvironmentTests {
     func toggleKeepsAtLeastOne() {
         let vm = NotchboardViewModel()
         vm.openAdd()
-        #expect(vm.addEnvironments == [.dev])
+        #expect(vm.elementForm.environments == [.dev])
         vm.toggleAddEnvironment(.stg)
-        #expect(vm.addEnvironments == [.dev, .stg])
+        #expect(vm.elementForm.environments == [.dev, .stg])
         vm.toggleAddEnvironment(.dev)
-        #expect(vm.addEnvironments == [.stg])
+        #expect(vm.elementForm.environments == [.stg])
         vm.toggleAddEnvironment(.stg)
-        #expect(vm.addEnvironments == [.stg], "removing the last environment is refused")
+        #expect(vm.elementForm.environments == [.stg], "removing the last environment is refused")
     }
 
     @Test("`.all` is a filter sentinel and can never be assigned")
@@ -160,14 +160,14 @@ struct EnvironmentTests {
         let vm = NotchboardViewModel()
         vm.openAdd()
         vm.toggleAddEnvironment(.all)
-        #expect(!vm.addEnvironments.contains(.all))
+        #expect(!vm.elementForm.environments.contains(.all))
     }
 
     @Test("Saving writes every selected environment")
     func saveKeepsAllEnvironments() {
         let vm = NotchboardViewModel()
         vm.openAdd()
-        vm.addName = "multi"
+        vm.elementForm.name = "multi"
         vm.toggleAddEnvironment(.stg)
         vm.saveElement()
         #expect(vm.activeGroup.elements.last?.environments == [.dev, .stg])
@@ -181,7 +181,7 @@ struct EnvironmentTests {
             return
         }
         vm.openEdit(element)
-        #expect(vm.addEnvironments == element.environments)
+        #expect(vm.elementForm.environments == element.environments)
         vm.saveElement()
         #expect(vm.selectedElement(id: element.id)?.environments == element.environments)
     }
@@ -201,9 +201,9 @@ struct ProductionMixWarningTests {
     func prdAloneIsFine() {
         let vm = NotchboardViewModel()
         vm.openAdd()
-        vm.addEnvironments = [.prd]
+        vm.elementForm.environments = [.prd]
         #expect(!vm.productionMixWarningNeeded(togglingOn: .prd), "removing prd can't create a mix")
-        vm.addEnvironments = []
+        vm.elementForm.environments = []
         #expect(!vm.productionMixWarningNeeded(togglingOn: .prd), "prd on its own needs no warning")
     }
 
@@ -211,7 +211,7 @@ struct ProductionMixWarningTests {
     func warnsFromTheOtherDirection() {
         let vm = NotchboardViewModel()
         vm.openAdd()
-        vm.addEnvironments = [.prd]
+        vm.elementForm.environments = [.prd]
         #expect(vm.productionMixWarningNeeded(togglingOn: .stg))
     }
 

@@ -51,9 +51,14 @@ To exercise docking at runtime you need Simulator.app running and the Accessibil
 - global ⌘K (open + focus search) and ⌘N (add element) via `NSEvent` monitors
 - a 0.15s reposition timer that reads view-model state and the tracked Simulator frame, then sizes/positions the panel per `PanelContentMode` (onboarding / notch / notch+coach-mark / expanded panel). Mode transitions animate, position tracking snaps 1:1.
 
-State lives in three `@Observable` classes, injected into views as `@Bindable`:
+State lives in `@Observable` classes, injected into views as `@Bindable`. `NotchboardViewModel` was decomposed on 2026-08-07 (1228 → 886 lines) into a coordinator that owns its collaborators:
 
-- `ViewModels/NotchboardViewModel.swift` — all catalogue state: workspace data, navigation, filters, forms, toasts, settings. Known god object, flagged for decomposition.
+- `ViewModels/NotchboardViewModel.swift` — the coordinator: chrome, navigation, filters, settings, identity, and the actions needing several collaborators (claims, the deeplink bridge, import/export UX). Keeps `workspace`/`collections`/`deeplinkScheme`/`toasts` as facades over the store so read-modify-write call sites read as they always have.
+- `ViewModels/CollectionStore.swift` — the data layer: every collection, the active one, element addressing (including the fully-addressed `mutate(_:group:collection:)` that async completions must use), collection lifecycle, group/element mutation, and the Keychain lifecycle that goes with deletion. **Nothing here toasts or navigates** — methods return what happened and the view model decides what to say. That is deliberate: this is what the sync milestone drives when a room message arrives from another Mac (vision.md §14).
+- `ViewModels/ElementFormModel.swift` / `GroupFormModel.swift` — the two forms' drafts and the rules about typing (environment toggling, production-mix detection, validation, field-key derivation). Saving stays in the view model since it needs the catalogue and the toast stack. `AddElementView`/`NewGroupView` bind to these directly as `draft`.
+- `ViewModels/ToastCenter.swift` — the message stack, with per-toast expiry.
+- `Persistence/Clipboard.swift` — pasteboard writes and concealed-copy expiry.
+- `Models/NBDeeplinkScheme.swift` — pure scheme normalisation, validation and URL building (the security boundary for the one feature that puts credentials in a URL).
 - `ViewModels/OnboardingViewModel.swift` — 4-step onboarding flow state.
 - `Docking/SimulatorWindowTracker.swift` — polls the AX API ~3x/sec for Simulator's presence and window frame. Polling (not `AXObserver`) is a documented deliberate tradeoff.
 
@@ -89,11 +94,11 @@ One deliberate, documented exception to the secrets posture: `simctl` takes the 
 
 ## Verification status (2026-08-07)
 
-165 tests pass, Release builds with zero warnings in app sources, and every shipped feature has now been exercised **by hand** from a wiped state — onboarding's three starting points, collection CRUD and switching, the per-collection deeplink scheme, encrypted export/import (right password, wrong password, skip path), snapshot restore, and "login on sim" against `SampleApp/NotchDemo`. See vision.md §13.9. Nothing is known-broken; what follows is debt and accepted trade-offs, not defects.
+195 tests pass (including the `SimctlBridge` integration suite against a booted simulator, which self-skips when none is booted — boot one before trusting a green run), Release builds with zero warnings in app sources, and every shipped feature has now been exercised **by hand** from a wiped state — onboarding's three starting points, collection CRUD and switching, the per-collection deeplink scheme, encrypted export/import (right password, wrong password, skip path), snapshot restore, and "login on sim" against `SampleApp/NotchDemo`. See vision.md §13.9. Nothing is known-broken; what follows is debt and accepted trade-offs, not defects.
 
 ## Known issues (as of 2026-08-07)
 
-- `NotchboardViewModel` is a god object (chrome, data, navigation, forms, toasts, settings, collections — now ~1050 lines). Decompose before sync work; the test target makes that safe.
+- `NotchboardViewModel` is down to ~886 lines after the 2026-08-07 decomposition, which is coordination rather than a god object, but still large. The two remaining coherent seams, if it needs to shrink again: the claim lifecycle (`claimOrRelease`/`takeOver`/`releaseExpiredClaims`/notify, ~110 lines) and the deeplink bridge (`loginOnSim`/`copyAuthAndClaim`/credential lookups, ~130 lines). Both were left in place deliberately — each needs the store, identity, toasts and the clipboard, so extracting them now would produce anemic types with four dependencies rather than a real boundary. Revisit when sync gives claims a second driver.
 - No SwiftFormat config. SwiftLint config exists but runs advisory in CI, with warnings not yet burned down.
 - Claim-age labels update on re-render (the 30s auto-release sweep triggers them), not on a per-minute tick of their own.
 - `secondaryText` still special-cases `group.id == "promos"`/`"products"` for row subtitles (guarded on the fields existing). Known debt; the login button was made schema-driven.
