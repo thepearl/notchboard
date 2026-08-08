@@ -23,7 +23,7 @@ struct OnboardingView: View {
                         HStack {
                             Button(action: onboarding.back) {
                                 Text("← back")
-                                    .font(NBFont.mono(9))
+                                    .font(NBFont.mono(10))
                                     .foregroundStyle(NBColor.textSecondary)
                             }
                             .buttonStyle(.nbPlain)
@@ -58,7 +58,7 @@ struct OnboardingView: View {
             Circle().fill(NBColor.trafficGreen).frame(width: 10, height: 10)
             Spacer()
             Text("notchboard setup")
-                .font(NBFont.mono(9))
+                .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.textSecondary)
             Spacer()
         }
@@ -163,7 +163,7 @@ private struct IdentityStep: View {
                 .padding(.top, 4)
 
             Text("YOUR NAME")
-                .nbMonoLabel(9.5, tracking: 0.8)
+                .nbMonoLabel(10.5, tracking: 0.8)
                 .padding(.top, 16)
 
             TextField("", text: $onboarding.name, prompt: Text("e.g. John Doe").foregroundStyle(NBColor.textMuted))
@@ -184,14 +184,14 @@ private struct IdentityStep: View {
                     .frame(width: 26, height: 26)
                     .overlay(
                         Text(onboarding.initials)
-                            .font(NBFont.mono(9))
+                            .font(NBFont.mono(10))
                             .foregroundStyle(NBColor.green)
                     )
                 HStack(spacing: 0) {
                     Text("this is how you appear on elements you use · ").foregroundStyle(NBColor.textSecondary)
                     Text("● \(onboarding.firstNameLowercased)").foregroundStyle(NBColor.green)
                 }
-                .font(NBFont.mono(9))
+                .font(NBFont.mono(10))
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 9)
@@ -260,7 +260,7 @@ private struct StartingPointStep: View {
                 // Honest about the state of the world: there is no backend, so there is
                 // nothing to join. Better than a button that pretends and toasts.
                 Text("joining a team? that needs the backend — not built yet.")
-                    .font(NBFont.mono(9))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.textMuted)
 
                 Spacer()
@@ -304,7 +304,7 @@ private struct StartingPointCard: View {
                     .font(NBFont.ui(12.5, weight: .semibold))
                     .foregroundStyle(NBColor.textPrimary)
                 Text(option.detail)
-                    .font(NBFont.mono(8.5))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.textSecondary)
             }
 
@@ -332,7 +332,7 @@ private struct AvatarBubble: View {
             .fill(color)
             .frame(width: 20, height: 20)
             .overlay(Circle().stroke(NBColor.panel, lineWidth: 2))
-            .overlay(Text(initials).font(NBFont.ui(7, weight: .bold)).foregroundStyle(.white))
+            .overlay(Text(initials).font(NBFont.ui(8, weight: .bold)).foregroundStyle(.white))
     }
 }
 
@@ -367,7 +367,7 @@ private struct PermissionStep: View {
                         .font(NBFont.ui(12, weight: .semibold))
                         .foregroundStyle(NBColor.textPrimaryAlt)
                     Text("System Settings → Privacy & Security")
-                        .font(NBFont.mono(8.5))
+                        .font(NBFont.mono(10))
                         .foregroundStyle(NBColor.textSecondary)
                 }
 
@@ -375,7 +375,7 @@ private struct PermissionStep: View {
 
                 if onboarding.accessibilityGranted {
                     Text("✓ granted")
-                        .font(NBFont.mono(9))
+                        .font(NBFont.mono(10))
                         .foregroundStyle(NBColor.green)
                 } else {
                     Button {
@@ -387,7 +387,7 @@ private struct PermissionStep: View {
                         }
                     } label: {
                         Text(promptRequested ? "open System Settings" : "grant access")
-                            .font(NBFont.mono(9))
+                            .font(NBFont.mono(10))
                             .foregroundStyle(NBColor.amber)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 3)
@@ -409,7 +409,7 @@ private struct PermissionStep: View {
             Text(promptRequested && !onboarding.accessibilityGranted
                  ? "flip the Notchboard toggle on in the Accessibility list — this step updates by itself once you do."
                  : "same pattern RocketSim uses — a known, App-Store-approved approach.")
-                .font(NBFont.mono(9))
+                .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.textMuted)
                 .lineSpacing(4)
                 .padding(.top, 10)

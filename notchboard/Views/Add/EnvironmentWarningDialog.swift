@@ -27,13 +27,10 @@ enum EnvironmentWarningDialog {
     static func confirmProductionMix(elementName: String) -> Answer {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Use production alongside another environment?"
         let subject = elementName.trimmingCharacters(in: .whitespacesAndNewlines)
-        alert.informativeText = """
-        \(subject.isEmpty ? "This element" : "“\(subject)”") would carry PRD credentials into dev or staging work. Anything that reads it — including “login on sim” — can fire real production credentials at a debug build, and they can end up in logs, screenshots and shared test sessions.
-
-        Keep production on its own element unless you genuinely need both.
-        """
+        alert.messageText = "Save \(subject.isEmpty ? "this element" : "“\(subject)”") with PRD mixed in?"
+        // One line, on purpose — the first team test called the long version "huge".
+        alert.informativeText = "Everything that reads this element — “login on sim” included — can fire real production credentials at a debug build."
         alert.addButton(withTitle: "I understand")
         alert.addButton(withTitle: "Cancel")
         alert.showsSuppressionButton = true

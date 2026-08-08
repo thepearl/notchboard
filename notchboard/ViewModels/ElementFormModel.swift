@@ -63,19 +63,6 @@ final class ElementFormModel {
         return true
     }
 
-    /// True when toggling `env` would leave production mixed with another environment.
-    /// The decision lives here so it's testable without a window; the AppKit warning is
-    /// the view's job (see EnvironmentWarningDialog).
-    func wouldMixProduction(togglingOn env: NBEnvironment) -> Bool {
-        guard env != .all else { return false }
-        var candidate = environments
-        if candidate.contains(env) {
-            candidate.remove(env)
-        } else {
-            candidate.insert(env)
-        }
-        return candidate.contains(.prd) && candidate.count > 1
-    }
 
     /// The trimmed values ready to persist, plus whatever is wrong with them. Returns nil
     /// for `problem` when the form is saveable.

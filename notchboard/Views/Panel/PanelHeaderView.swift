@@ -29,7 +29,7 @@ struct PanelHeaderView: View {
 
             if let session = viewModel.activeRoomSession, session.state == .connected {
                 Text("· \(session.onlineMemberIDs.count + 1) online")
-                    .font(NBFont.mono(9.5))
+                    .font(NBFont.mono(12))
                     .foregroundStyle(NBColor.green)
                     .help("people in this collection's room right now, including you")
             }
@@ -138,7 +138,7 @@ struct PanelHeaderView: View {
             .disabled(viewModel.collections.count == 1)
         } label: {
             Text("/ \(viewModel.workspace.name) ▾")
-                .font(NBFont.mono(9.5))
+                .font(NBFont.mono(12))
                 .foregroundStyle(NBColor.textSecondary)
         }
         .menuStyle(.button)

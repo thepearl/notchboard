@@ -63,6 +63,7 @@ struct NotchboardSceneView: View {
         .onChange(of: viewModel.startExpanded) { persist() }
         .onChange(of: viewModel.dockEdge) { persist() }
         .onChange(of: viewModel.hotKeyModifier) { persist() }
+        .onChange(of: viewModel.notificationSoundEnabled) { persist() }
         .onChange(of: viewModel.pendingCoachMark) { persist() }
         .onChange(of: onboarding.isPresented) { persist() }
         .onChange(of: onboarding.name) {
@@ -130,7 +131,6 @@ struct NotchboardSceneView: View {
 
     private var notch: some View {
         CollapsedNotchView(
-            claimedCount: viewModel.claimedCount,
             edge: viewModel.dockEdge,
             syncColor: NBColor.syncState(viewModel.activeRoomState)
         ) {

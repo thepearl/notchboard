@@ -39,7 +39,7 @@ To exercise docking at runtime you need Simulator.app running and the Accessibil
 ## Hard constraints (do not change casually)
 
 - `ENABLE_APP_SANDBOX = NO` in both configurations. A sandboxed process's Accessibility calls against other processes are silently swallowed. No permission dialog ever appears and there is no error. This cost real debugging time (vision.md §13.3). Never re-enable it.
-- `FloatingPanel` is a borderless `.nonactivatingPanel` that overrides `canBecomeKey`. This is what lets text fields work without the app ever stealing focus from Simulator or Xcode. Changing the style mask or activation policy breaks the core UX.
+- `FloatingPanel` is a borderless `.nonactivatingPanel` that overrides `canBecomeKey`. This is what lets text fields work without the app ever stealing focus from Simulator or Xcode. Changing the style mask or activation policy breaks the core UX. Its window *level* is managed by `AppDelegate.syncPanelLevel` (app-activation notifications + the fallback tick): `.floating` only while Simulator or Notchboard itself is frontmost — deliberately NOT Xcode — `.normal` otherwise. A permanent `.floating` left the panel hovering over Chrome while the Simulator it was docked to was buried (first team test).
 - The app runs as an agent via `NSApp.setActivationPolicy(.accessory)` in `AppDelegate` (not `LSUIElement` in Info.plist — the Info.plist is generated, `GENERATE_INFOPLIST_FILE = YES`).
 - Accessibility API coordinates are top-left origin relative to the primary screen (the one whose AppKit frame origin is zero). AppKit is bottom-left origin. The conversion lives in `Docking/SimulatorWindowTracker.swift`. AX reads run on a background task because they can block for seconds when Simulator is busy. NSScreen reads stay on the main thread.
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on. Everything is main-actor by default. Be explicit when moving work off the main actor.
@@ -70,7 +70,7 @@ State lives in `@Observable` classes, injected into views as `@Bindable`. `Notch
 - `Persistence/Clipboard.swift` — pasteboard writes and concealed-copy expiry.
 - `Models/NBDeeplinkScheme.swift` — pure scheme normalisation, validation and URL building (the security boundary for the one feature that puts credentials in a URL).
 - `ViewModels/OnboardingViewModel.swift` — 4-step onboarding flow state.
-- `Docking/SimulatorWindowTracker.swift` — polls the AX API ~3x/sec for Simulator's presence and window frame. Polling (not `AXObserver`) is a documented deliberate tradeoff.
+- `Docking/SimulatorWindowTracker.swift` — polls the AX API adaptively: ~60Hz while a Simulator drag is possible (frontmost + mouse down), 10Hz while it's merely frontmost, ~3Hz otherwise; `onUpdate` repositions the panel the moment a change lands, so frame-following no longer waits for the 0.15s fallback tick. Polling (not `AXObserver`) stays deliberate — AX move notifications don't fire continuously during a live drag.
 
 Other modules:
 

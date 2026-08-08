@@ -750,6 +750,54 @@ offline longer can resurrect a deleted row; and LWW still silently drops one sid
 genuinely simultaneous same-element edit, §14.2's known trade with `automerge-swift` as
 the escalation path.
 
+### 13.11 The first two-human test (2026-08-08)
+
+Ghazi and a colleague ran the QA plan (docs/room-test-plan.md) against the public EMQX
+broker — the first time two people, two Macs and a real TLS handshake met the room. T1–T10
+all passed: setup, export-as-invitation, import + join prompt, adopt, presence, live edits
+both ways, schema propagation, attributed in-use marks, notify-when-free, login-on-sim.
+The `mqtts://` path is no longer theoretical.
+
+Five findings, all fixed the same day — four from the colleague's first-ever session,
+which is exactly the fresh-eyes value a second human adds:
+
+- **The room dialog's example hostname got typed in verbatim** (broker.example.com,
+  ten-second timeout, red dot). No dialog copy shows an enterable-looking address any
+  more; the placeholder is `mqtts://your-broker:8883`.
+- **The list footer still said "· local" with a live room connected.** Pre-sync copy that
+  never learned about rooms. It now reports the truth: local / live / connecting… / room
+  offline / room unreachable, plus "n online" while connected.
+- **"+ new user" read as a stray label in a weird place.** It is now a real amber button,
+  top of the list beside the search field, labelled "+ new <singular> entry" — the word
+  *entry* was the missing half of the sentence.
+- **The production-mixing warning fired on every environment chip.** It now fires once,
+  on save — the moment of commitment — with the copy cut to one line ("huge" was the
+  colleague's word for the old version). Toggling while composing is prompt-free.
+- **The notch "wasn't really helping".** Two rounds: the first replaced the rotated
+  count with upright in-use/free/online counts at 36×190 — and Ghazi's same-day retest
+  killed that too ("too big, the infos are not useful"). Final form is 36×110 (wider
+  than the original 28, and shorter) showing exactly two things: the connection dot and
+  the expand chevron. A lesson recorded for the next redesign impulse: the notch is a
+  door handle, not a dashboard. Still nothing animates at rest.
+
+Also added on request: a Settings toggle for notification sound (on by default — the
+banner always shows, the ping is optional).
+
+A sixth finding surfaced at the end of the session: switching to Chrome hid the
+Simulator (normal window level) but not the panel (permanent `.floating` level), leaving
+Notchboard visibly docked to a window that was no longer there. The panel now floats
+only while Simulator (or Notchboard itself) is frontmost — narrowed from the chords'
+Xcode-inclusive set on Ghazi's follow-up: "it's supposed to be with Simulator only" —
+and drops to normal level otherwise, so the app the user switches to covers it exactly
+as it covers the Simulator. Level changes ride app-activation notifications, not a timer.
+
+The last polish of the session was follow latency: the panel trailed a dragged Simulator
+window by up to half a second (a 0.35s AX poll stacked on a 0.15s reposition tick). The
+tracker now polls adaptively — ~60Hz exactly while a drag is possible (Simulator
+frontmost, mouse button down), 10Hz while it's merely frontmost, the old ~3Hz otherwise —
+and fires a callback that repositions the panel the moment a frame lands. Docked
+movement now reads as part of the Simulator window rather than something chasing it.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between

@@ -66,7 +66,7 @@ struct NewGroupView: View {
     private var fieldsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("FIELDS — every element shares this shape")
-                .nbMonoLabel(9.5, tracking: 0.8)
+                .nbMonoLabel(10.5, tracking: 0.8)
                 .padding(.top, 13)
 
             VStack(spacing: 6) {
@@ -111,7 +111,7 @@ struct NewGroupView: View {
                 Text(confirmingDelete
                      ? "really delete “\(viewModel.activeGroup.label)” and its \(elementCount) element\(elementCount == 1 ? "" : "s")?"
                      : "delete group…")
-                    .font(NBFont.mono(9))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.red)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -201,7 +201,7 @@ private struct FieldEditorRow: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .font(NBFont.mono(9.5))
+                .font(NBFont.mono(10.5))
                 .tint(field.type.color)
                 .fixedSize()
 
@@ -220,7 +220,7 @@ private struct FieldEditorRow: View {
             if field.type == .picker {
                 HStack(spacing: 7) {
                     Text("options")
-                        .font(NBFont.mono(9, weight: .medium))
+                        .font(NBFont.mono(10, weight: .medium))
                         .foregroundStyle(NBColor.typePicker)
                     TextField("", text: $optionsDraft, prompt: Text("core, premium, limited").foregroundStyle(NBColor.textMuted))
                         .textFieldStyle(.plain)

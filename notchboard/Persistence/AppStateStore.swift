@@ -44,6 +44,8 @@ struct PersistedAppState: Codable, Equatable {
     var hotKeyModifier: NBHotKeyModifier
     /// "Don't warn me again" from the production-mixing dialog.
     var suppressProductionMixWarning: Bool
+    /// Whether notify-when-free notifications play a sound (Settings toggle).
+    var notificationSoundEnabled: Bool
 
     /// The active collection's catalogue — the shape tests mostly build against. Falls
     /// back to the first collection if the active id is stale.
@@ -72,9 +74,11 @@ struct PersistedAppState: Codable, Equatable {
         onboardingName: String,
         coachMarkPending: Bool = false,
         hotKeyModifier: NBHotKeyModifier = .control,
-        suppressProductionMixWarning: Bool = false
+        suppressProductionMixWarning: Bool = false,
+        notificationSoundEnabled: Bool = true
     ) {
         self.suppressProductionMixWarning = suppressProductionMixWarning
+        self.notificationSoundEnabled = notificationSoundEnabled
         self.schemaVersion = Self.currentSchemaVersion
         self.collections = collections
         self.activeCollectionID = activeCollectionID
@@ -92,7 +96,7 @@ struct PersistedAppState: Codable, Equatable {
         case schemaVersion, collections, activeCollectionID, memberID
         case autoReleaseMinutes, startExpanded, dockEdge
         case onboardingCompleted, onboardingName, coachMarkPending, hotKeyModifier
-        case suppressProductionMixWarning
+        case suppressProductionMixWarning, notificationSoundEnabled
     }
 
     /// Settings decode leniently (missing keys fall back to defaults) so adding a field
@@ -133,6 +137,7 @@ struct PersistedAppState: Codable, Equatable {
         coachMarkPending = try container.decodeIfPresent(Bool.self, forKey: .coachMarkPending) ?? false
         hotKeyModifier = try container.decodeIfPresent(NBHotKeyModifier.self, forKey: .hotKeyModifier) ?? .control
         suppressProductionMixWarning = try container.decodeIfPresent(Bool.self, forKey: .suppressProductionMixWarning) ?? false
+        notificationSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationSoundEnabled) ?? true
     }
 }
 

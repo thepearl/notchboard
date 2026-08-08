@@ -30,7 +30,7 @@ struct GroupTabsView: View {
             if !viewModel.activeGroup.id.isEmpty {
                 Button(action: viewModel.openEditGroup) {
                     Text("✎")
-                        .font(NBFont.ui(11))
+                        .font(NBFont.ui(12))
                         .foregroundStyle(NBColor.textSecondary)
                         .frame(width: 22, height: 22)
                 }
@@ -41,7 +41,7 @@ struct GroupTabsView: View {
 
             Button(action: viewModel.openNewGroup) {
                 Text("＋ new group")
-                    .font(NBFont.ui(11))
+                    .font(NBFont.ui(14))
                     .foregroundStyle(NBColor.textSecondary)
             }
             .buttonStyle(.nbPlain)

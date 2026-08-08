@@ -11,7 +11,7 @@ struct CoachMarkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("docked ✓")
-                .font(NBFont.mono(9))
+                .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.green)
 
             Text("Notchboard found your Simulator and attached itself. Click the notch to open your catalogue.")
@@ -21,7 +21,7 @@ struct CoachMarkView: View {
 
             Button(action: onDone) {
                 Text("got it")
-                    .font(NBFont.mono(9))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.amber)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)

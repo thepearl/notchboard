@@ -29,7 +29,7 @@ struct EnvironmentFilterView: View {
 /// once, so this renders the whole set in a fixed order rather than one value.
 struct EnvironmentBadges: View {
     let environments: [NBEnvironment]
-    var size: CGFloat = 9
+    var size: CGFloat = 10
 
     var body: some View {
         HStack(spacing: 3) {

@@ -69,7 +69,7 @@ struct AddElementView: View {
                         }
                     }
                     Text("pick every environment these values are valid in")
-                        .font(NBFont.mono(9))
+                        .font(NBFont.mono(10))
                         .foregroundStyle(NBColor.textMuted)
                 }
             }
@@ -81,14 +81,10 @@ struct AddElementView: View {
         .padding(.top, 17)
     }
 
-    /// Toggling an environment is one click, except the one combination worth a second
-    /// thought: production alongside anything else (see EnvironmentWarningDialog).
+    /// Toggling an environment is always one click. The production-mixing speed bump
+    /// fires once, when the element is saved (NotchboardViewModel.saveElement) — warning
+    /// on every chip interrupted combinations the user was still composing.
     private func toggle(_ env: NBEnvironment) {
-        if viewModel.productionMixWarningNeeded(togglingOn: env) {
-            let answer = EnvironmentWarningDialog.confirmProductionMix(elementName: draft.name)
-            if answer.suppressFuture { viewModel.suppressProductionMixWarning = true }
-            guard answer.confirmed else { return }
-        }
         viewModel.toggleAddEnvironment(env)
     }
 
@@ -195,7 +191,7 @@ struct LabeledField<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(labelText)
-                .nbMonoLabel(9.5, tracking: 0.8)
+                .nbMonoLabel(10.5, tracking: 0.8)
             content()
         }
     }

@@ -31,37 +31,43 @@ struct DetailView: View {
         return ("○ free", NBColor.textSecondary)
     }
 
+    /// Two tight rows (third iteration — one crowded line was noise, but a dedicated
+    /// chrome row wasted a whole line on two small buttons and read even worse):
+    /// back / name / star / ⋯ share the top line, and the status + badges tuck directly
+    /// under the name so the block hangs together.
     private var header: some View {
-        HStack(alignment: .top, spacing: 9) {
-            NBBackButton(action: viewModel.backToList)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(element.name)
-                        .font(NBFont.ui(14, weight: .bold))
-                        .foregroundStyle(NBColor.textPrimary)
-                    Button {
-                        viewModel.toggleFavorite(element.id)
-                    } label: {
-                        Text(element.isFavorite ? "★" : "☆")
-                            .font(NBFont.mono(14))
-                            .foregroundStyle(element.isFavorite ? NBColor.amber : NBColor.textMuted)
-                            .frame(width: 20, height: 22)
-                    }
-                    .buttonStyle(.nbPlain)
-                    .help(element.isFavorite ? "unfavourite" : "favourite")
-                }
-                Text(claimLine.text)
-                    .font(NBFont.mono(9.5))
-                    .foregroundStyle(claimLine.color)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 9) {
+                NBBackButton(action: viewModel.backToList)
+                Text(element.name)
+                    .font(NBFont.ui(15, weight: .bold))
+                    .foregroundStyle(NBColor.textPrimary)
+                    .lineLimit(1)
+                // The status dot, not the star: green filled = in use, grey outline =
+                // free, words in the tooltip. The star still lives on the list rows —
+                // up here it competed with the name for no reason (team feedback).
+                statusDot
+                Spacer()
+                elementActionsMenu
             }
 
-            Spacer()
-
-            EnvironmentBadges(environments: element.sortedEnvironments, size: 9)
-
-            elementActionsMenu
+            HStack {
+                Spacer()
+                EnvironmentBadges(environments: element.sortedEnvironments, size: 10)
+            }
         }
+    }
+
+    private var statusDot: some View {
+        Group {
+            if element.isClaimed {
+                Circle().fill(claimLine.color)
+            } else {
+                Circle().strokeBorder(NBColor.textSecondary, lineWidth: 1.5)
+            }
+        }
+        .frame(width: 9, height: 9)
+        .help(claimLine.text)
     }
 
     /// Edit and delete live here rather than as a pair of small text buttons at the bottom
@@ -178,7 +184,7 @@ struct DetailView: View {
                 Text(viewModel.resolvedDeeplinkScheme.isEmpty
                      ? "no URL scheme yet — set one from the ▾ menu next to the collection name"
                      : "fires \(viewModel.resolvedDeeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
-                    .font(NBFont.mono(9))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.textMuted)
             }
 
@@ -249,7 +255,7 @@ private struct MetaRow: View {
     var body: some View {
         HStack(alignment: wraps ? .top : .firstTextBaseline, spacing: 8) {
             Text(label)
-                .font(NBFont.mono(9.5, weight: .medium))
+                .font(NBFont.mono(10.5, weight: .medium))
                 .foregroundStyle(NBColor.textMuted)
                 .frame(width: 72, alignment: .leading)
             Text(value)
@@ -279,7 +285,7 @@ private struct FieldRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(label)
-                .font(NBFont.mono(9.5, weight: .medium))
+                .font(NBFont.mono(10.5, weight: .medium))
                 .foregroundStyle(NBColor.textMuted)
                 .frame(width: 72, alignment: .leading)
             Text(isSecret && !isRevealed ? "••••••••••" : value)
@@ -291,13 +297,13 @@ private struct FieldRow: View {
             if isSecret {
                 Button(action: onReveal) {
                     Text(isRevealed ? "hide" : "reveal")
-                        .font(NBFont.mono(9))
+                        .font(NBFont.mono(10))
                         .foregroundStyle(NBColor.textDim)
                 }
                 .buttonStyle(.nbPlain)
             }
             Text("⧉")
-                .font(NBFont.mono(9))
+                .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.amber)
         }
         .padding(11)

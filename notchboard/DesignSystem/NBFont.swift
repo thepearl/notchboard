@@ -28,7 +28,7 @@ enum NBFont {
 /// 8pt mono with 0.6 tracking is a caption, and these are the labels naming every field
 /// in the app.
 extension View {
-    func nbMonoLabel(_ size: CGFloat = 9.5, color: Color = NBColor.textMuted, tracking: CGFloat = 0.6) -> some View {
+    func nbMonoLabel(_ size: CGFloat = 10.5, color: Color = NBColor.textMuted, tracking: CGFloat = 0.6) -> some View {
         self.font(NBFont.mono(size, weight: .medium))
             .foregroundStyle(color)
             .tracking(tracking)

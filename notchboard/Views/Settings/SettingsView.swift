@@ -41,6 +41,8 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("Play a sound with notifications", isOn: $viewModel.notificationSoundEnabled)
+
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
                         // Ignore our own write-backs, or reverting the toggle would fire a

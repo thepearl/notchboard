@@ -110,11 +110,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installGlobalShortcuts()
         Notifier.requestAuthorization()
 
+        // The panel repositions the moment the tracker lands a change — during a drag the
+        // tracker reads at ~60Hz, and waiting for a timer of our own is where the old
+        // rubber-band lag came from.
+        tracker.onUpdate = { [weak self] in
+            self?.updatePanelFrame()
+        }
         tracker.start()
 
-        // Reposition/resize/show-hide as onboarding state, panel expansion, coach mark, or
-        // the Simulator's real presence/window frame changes. Polling keeps this simple; see
-        // SimulatorWindowTracker for the same tradeoff on the tracking side.
+        // The window level and the chords react to app switches the instant they happen —
+        // the panel dropping behind Chrome must not wait out a timer tick.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.syncPanelLevel()
+                self?.syncHotKeyRegistration()
+            }
+        }
+
+        // Slow fallback tick for everything not event-driven: the deferred coach mark,
+        // SwiftUI-side state changes (expand/collapse) that need a frame pass, and hotkey
+        // re-checks. Frame-following no longer rides this — see tracker.onUpdate above.
         repositionTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             self?.updatePanelFrame()
         }
@@ -447,6 +464,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return Self.hotKeyHostBundleIDs.contains(bundleID)
     }
 
+    /// Keeps the panel stacked like it's glued to the Simulator window, not floating over
+    /// the whole machine. At a permanent `.floating` level the panel stayed on top when
+    /// the user switched to Chrome — Chrome covered the Simulator (normal level) but not
+    /// the panel, leaving it visibly docked to a window that was no longer there. So the
+    /// panel floats only while Simulator (or Notchboard itself — the Settings window)
+    /// is frontmost and drops to `.normal` otherwise, where the newly activated app
+    /// covers it exactly as it covers Simulator. Deliberately NOT the hotkey set: in
+    /// Xcode the panel behaves like any sibling window too ("with Simulator only" —
+    /// team feedback). Onboarding and the undocked fallback keep floating — they aren't
+    /// glued to anything. Runs on app-activation notifications and the fallback tick,
+    /// equality-guarded like everything else on that tick.
+    private func syncPanelLevel() {
+        guard panel != nil else { return }
+        let shouldFloat = onboarding.isPresented || fallbackPanelVisible || simulatorOrSelfIsFrontmost
+        let level: NSWindow.Level = shouldFloat ? .floating : .normal
+        guard panel.level != level else { return }
+        panel.level = level
+    }
+
+    private var simulatorOrSelfIsFrontmost: Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return false }
+        return bundleID == SimulatorWindowTracker.simulatorBundleID
+            || bundleID == Bundle.main.bundleIdentifier
+    }
+
     /// Claims the global chords only while they can be acted on *and* the user is in the
     /// iOS-development context, and hands them straight back otherwise.
     private func syncHotKeyRegistration() {
@@ -538,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Claim or release the global chords as availability changes. Cheap: this only calls
         // into Carbon on an actual transition.
         syncHotKeyRegistration()
+        syncPanelLevel()
 
         // Onboarding may have finished before Simulator ever ran — deliver the deferred
         // coach mark the first time it appears instead of silently skipping it. Lives on
@@ -594,23 +637,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             size = CGSize(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight)
         }
 
+        // The collapsed notch sits a touch below the window's vertical centre (team
+        // feedback) — the expanded panel stays centred.
+        let isNotchMode = mode == .notch || mode == .notchWithCoachMark
         let frame = Self.dockedFrame(
             simFrame: simFrame,
             size: size,
             edge: viewModel.dockEdge,
-            clampedTo: screenContaining(simFrame)?.visibleFrame
+            clampedTo: screenContaining(simFrame)?.visibleFrame,
+            verticalOffset: isNotchMode ? -Self.notchVerticalOffset : 0
         )
         apply(frame, to: panel, mode: mode)
     }
+
+    /// How far below the Simulator window's vertical centre the collapsed notch sits.
+    static let notchVerticalOffset: CGFloat = 10
 
     /// The docked panel frame: flush against the chosen Simulator window edge, vertically
     /// centred on it, then clamped to the screen's visible frame. Without the clamp, a
     /// Simulator window flush against the screen edge (zoomed, fullscreen) put the whole
     /// panel offscreen — still "visible" as far as AppKit was concerned, but unreachable.
     /// Borderless panels get none of AppKit's usual titled-window frame constraining.
-    static func dockedFrame(simFrame: NSRect, size: CGSize, edge: NBDockEdge, clampedTo visible: NSRect?) -> NSRect {
+    static func dockedFrame(simFrame: NSRect, size: CGSize, edge: NBDockEdge, clampedTo visible: NSRect?, verticalOffset: CGFloat = 0) -> NSRect {
         let x = edge == .right ? simFrame.maxX : simFrame.minX - size.width
-        let y = simFrame.midY - size.height / 2
+        // AppKit is bottom-left origin: a negative offset moves the window DOWN screen.
+        let y = simFrame.midY - size.height / 2 + verticalOffset
         var frame = NSRect(x: x, y: y, width: size.width, height: size.height)
         if let visible {
             frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)

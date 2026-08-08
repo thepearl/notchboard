@@ -67,24 +67,39 @@ private struct ListFooterView: View {
 
     var body: some View {
         HStack {
-            // No fake "sync Ns ago" freshness — there is no sync in this local build.
+            // The freshness word is honest: "local" only while there is no room. With one
+            // configured it reports the room's actual state — the first team test read a
+            // connected room labelled "local" as a bug, and they were right.
             HStack(spacing: 0) {
                 Text("\(viewModel.claimedCount) in use").foregroundStyle(NBColor.green)
-                Text(" · local").foregroundStyle(NBColor.textSecondary)
+                Text(" · \(connectionWord.text)").foregroundStyle(connectionWord.color)
             }
-            .font(NBFont.mono(9.5))
+            .font(NBFont.mono(11))
 
             Spacer()
 
-            Button(action: viewModel.openAdd) {
-                Text("＋ new \(viewModel.activeGroup.singular) \(viewModel.hotKeyModifier.symbolPrefix)N")
-                    .font(NBFont.mono(9.5))
-                    .foregroundStyle(NBColor.amber)
+            if let online = viewModel.onlineCount {
+                Text("\(online) online")
+                    .font(NBFont.mono(11))
+                    .foregroundStyle(NBColor.green)
+            } else {
+                Text("＋ \(viewModel.hotKeyModifier.symbolPrefix)N · search \(viewModel.hotKeyModifier.symbolPrefix)K")
+                    .font(NBFont.mono(11))
+                    .foregroundStyle(NBColor.textMuted)
             }
-            .buttonStyle(.nbPlain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private var connectionWord: (text: String, color: Color) {
+        switch viewModel.activeRoomState {
+        case nil: return ("local", NBColor.textSecondary)
+        case .connected: return ("live", NBColor.green)
+        case .connecting: return ("connecting…", NBColor.amber)
+        case .failed: return ("room unreachable", NBColor.red)
+        case .disconnected: return ("room offline", NBColor.amber)
+        }
     }
 }
 

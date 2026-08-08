@@ -37,12 +37,13 @@ enum Notifier {
 
     /// Posts an immediate local notification. Silently does nothing if the user declined
     /// permission — the in-app toast still fires, so the feature degrades gracefully.
-    static func notifyElementFree(name: String) {
+    /// `withSound` is the Settings toggle: the banner always shows, the ping is optional.
+    static func notifyElementFree(name: String, withSound: Bool = true) {
         guard isAvailable else { return }
         let content = UNMutableNotificationContent()
         content.title = "Now free: \(name)"
         content.body = "The element you were watching is free to use."
-        content.sound = .default
+        content.sound = withSound ? .default : nil
 
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in

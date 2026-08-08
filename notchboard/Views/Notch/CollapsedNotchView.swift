@@ -3,13 +3,15 @@
 //  notchboard
 //
 //  The slim vertical tab that stays docked to the Simulator window's edge when the
-//  panel is collapsed. Amber glyph + pulsing claim-count readout.
+//  panel is collapsed. Deliberately minimal after two rounds of team feedback: counts up
+//  here weren't worth glancing at, so it shows exactly two things — the connection dot
+//  (amber local, green live, red unreachable) and the expand chevron. Zero animation at
+//  rest (CLAUDE.md).
 //
 
 import SwiftUI
 
 struct CollapsedNotchView: View {
-    let claimedCount: Int
     var edge: NBDockEdge = .right
     /// The room connection colour (NBColor.syncState) — one token with the header's dot
     /// so the two surfaces can't disagree. Amber when there is no room, exactly as before.
@@ -28,24 +30,19 @@ struct CollapsedNotchView: View {
     }
 
     var body: some View {
-        VStack(spacing: 7) {
+        // Dot and chevron sit together, centred — the stretched-apart version wasted
+        // height on nothing (team feedback), so the notch shrank to fit them.
+        VStack(spacing: 10) {
             Rectangle()
                 .fill(syncColor)
-                .frame(width: 9, height: 9)
-
-            Text("●\(claimedCount)")
-                .font(NBFont.mono(9, weight: .medium))
-                .foregroundStyle(NBColor.green)
-                .rotationEffect(.degrees(90))
-                .fixedSize()
-                .frame(width: 12)
+                .frame(width: 11, height: 11)
+                .help("room connection — amber local, green live, red unreachable")
 
             Text(edge == .right ? "»" : "«")
-                .font(NBFont.mono(9))
-                .foregroundStyle(NBColor.textSecondary)
+                .font(NBFont.mono(12))
+                .foregroundStyle(isHovering ? NBColor.textPrimaryAlt : NBColor.textSecondary)
         }
-        .padding(.vertical, 11)
-        .padding(.horizontal, 7)
+        .frame(width: NBMetrics.notchWidth, height: NBMetrics.notchHeight)
         .background(isHovering ? NBColor.rowHover : NBColor.chip.opacity(0.9))
         .overlay(notchShape.stroke(isHovering ? NBColor.borderStrong : NBColor.border, lineWidth: 1))
         .clipShape(notchShape)
@@ -54,21 +51,22 @@ struct CollapsedNotchView: View {
         .onTapGesture(perform: onTap)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.15), value: isHovering)
+        .help("open notchboard")
     }
 }
 
-#Preview("Docked right") {
+#Preview("Docked right, room live") {
     ZStack {
         NBColor.background
-        CollapsedNotchView(claimedCount: 3, onTap: {})
+        CollapsedNotchView(syncColor: NBColor.green, onTap: {})
     }
-    .frame(width: 200, height: 260)
+    .frame(width: 200, height: 220)
 }
 
-#Preview("Docked left") {
+#Preview("Docked left, local") {
     ZStack {
         NBColor.background
-        CollapsedNotchView(claimedCount: 3, edge: .left, onTap: {})
+        CollapsedNotchView(edge: .left, onTap: {})
     }
-    .frame(width: 200, height: 260)
+    .frame(width: 200, height: 220)
 }

@@ -70,7 +70,7 @@ struct ElementRowView: View {
                 )
             }
 
-            EnvironmentBadges(environments: element.sortedEnvironments, size: 8.5)
+            EnvironmentBadges(environments: element.sortedEnvironments, size: 9.5)
 
             Button {
                 viewModel.copyPrimaryField(of: element)
@@ -79,7 +79,7 @@ struct ElementRowView: View {
                 // target. Applied outside the Button (as they were) they drew a box larger
                 // than the button, leaving most of the visible control dead.
                 Text("⧉")
-                    .font(NBFont.mono(9))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.textSecondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
@@ -145,7 +145,7 @@ private struct ClaimBadge: View {
                     value: pulse
                 )
             Text(who)
-                .font(NBFont.mono(8.5))
+                .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.green)
         }
         .padding(.horizontal, 6)
@@ -169,17 +169,17 @@ private struct ClaimBadge: View {
                     .font(NBFont.ui(11, weight: .semibold))
                     .foregroundStyle(NBColor.textPrimaryAlt)
                 Text("in use · \(ageLabel) · \(envLabel)")
-                    .font(NBFont.mono(8.5))
+                    .font(NBFont.mono(10))
                     .foregroundStyle(NBColor.green)
                 if let autoReleaseIn {
                     Text("auto-release: \(autoReleaseIn)m idle")
-                        .font(NBFont.mono(8.5))
+                        .font(NBFont.mono(10))
                         .foregroundStyle(NBColor.textSecondary)
                 }
                 if showNotify {
                     Button(action: onNotify) {
                         Text("notify when free")
-                            .font(NBFont.mono(8.5))
+                            .font(NBFont.mono(10))
                             .foregroundStyle(NBColor.amber)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
@@ -203,7 +203,7 @@ struct RowsEmptyStateView: View {
     var body: some View {
         VStack {
             Text("no elements match — clear filters or ＋ add one")
-                .font(NBFont.mono(9.5))
+                .font(NBFont.mono(10.5))
                 .foregroundStyle(NBColor.textMuted)
                 .multilineTextAlignment(.center)
         }

@@ -190,44 +190,88 @@ struct EnvironmentTests {
 @Suite("Production mixing warning")
 struct ProductionMixWarningTests {
 
-    @Test("Warns when production would join another environment")
-    func warnsOnMix() {
+    /// A view model whose warning dialog is a stub (the deeplinkOpener pattern — a real
+    /// modal would hang the suite), plus a counter proving when it fired.
+    private func makeVM(answer: EnvironmentWarningDialog.Answer) -> (vm: NotchboardViewModel, prompts: () -> Int) {
         let vm = NotchboardViewModel()
-        vm.openAdd() // [.dev]
-        #expect(vm.productionMixWarningNeeded(togglingOn: .prd))
+        let box = Counter()
+        vm.confirmProductionMix = { _ in
+            box.count += 1
+            return answer
+        }
+        return (vm, { box.count })
     }
 
-    @Test("Production alone is not a mix")
-    func prdAloneIsFine() {
-        let vm = NotchboardViewModel()
+    private final class Counter {
+        var count = 0
+    }
+
+    @Test("The warning fires once, at save, not on the environment chips")
+    func warnsAtSaveOnly() {
+        let (vm, prompts) = makeVM(answer: .init(confirmed: true, suppressFuture: false))
         vm.openAdd()
+        vm.elementForm.name = "mixed"
+        // Composing the combination is prompt-free however many toggles it takes —
+        // first team test: per-toggle warnings read as spam.
+        vm.toggleAddEnvironment(.prd)
+        vm.toggleAddEnvironment(.stg)
+        vm.toggleAddEnvironment(.stg)
+        vm.toggleAddEnvironment(.stg)
+        #expect(prompts() == 0, "toggling must never prompt")
+
+        let before = vm.activeGroup.elements.count
+        vm.saveElement()
+        #expect(prompts() == 1, "the save click is the one moment of commitment")
+        #expect(vm.activeGroup.elements.count == before + 1)
+        #expect(vm.activeGroup.elements.last?.environments == [.dev, .prd, .stg],
+                "on-off-on leaves staging on — three toggles, zero prompts")
+    }
+
+    @Test("Cancelling the warning keeps the form open and saves nothing")
+    func cancelAborts() {
+        let (vm, prompts) = makeVM(answer: .init(confirmed: false, suppressFuture: false))
+        vm.openAdd()
+        vm.elementForm.name = "mixed"
+        vm.toggleAddEnvironment(.prd)
+
+        let before = vm.activeGroup.elements.count
+        vm.saveElement()
+        #expect(prompts() == 1)
+        #expect(vm.activeGroup.elements.count == before, "cancel must not save")
+        #expect(vm.currentView == .add, "the form stays open so the mix can be fixed")
+    }
+
+    @Test("No mix, no prompt — production alone included")
+    func noPromptWithoutMix() {
+        let (vm, prompts) = makeVM(answer: .init(confirmed: true, suppressFuture: false))
+        vm.openAdd()
+        vm.elementForm.name = "prd only"
         vm.elementForm.environments = [.prd]
-        #expect(!vm.productionMixWarningNeeded(togglingOn: .prd), "removing prd can't create a mix")
-        vm.elementForm.environments = []
-        #expect(!vm.productionMixWarningNeeded(togglingOn: .prd), "prd on its own needs no warning")
-    }
+        vm.saveElement()
 
-    @Test("Adding a second environment to a production element also warns")
-    func warnsFromTheOtherDirection() {
-        let vm = NotchboardViewModel()
         vm.openAdd()
-        vm.elementForm.environments = [.prd]
-        #expect(vm.productionMixWarningNeeded(togglingOn: .stg))
-    }
+        vm.elementForm.name = "dev+stg"
+        vm.toggleAddEnvironment(.stg)
+        vm.saveElement()
 
-    @Test("Never warns for dev and staging together")
-    func noWarningWithoutProduction() {
-        let vm = NotchboardViewModel()
-        vm.openAdd()
-        #expect(!vm.productionMixWarningNeeded(togglingOn: .stg))
+        #expect(prompts() == 0, "PRD alone and dev+staging are not the risky combination")
     }
 
     @Test("Suppressing silences it, and the choice survives a persist/restore round trip")
     func suppressionPersists() {
-        let vm = NotchboardViewModel()
+        let (vm, prompts) = makeVM(answer: .init(confirmed: true, suppressFuture: true))
         vm.openAdd()
-        vm.suppressProductionMixWarning = true
-        #expect(!vm.productionMixWarningNeeded(togglingOn: .prd))
+        vm.elementForm.name = "first mix"
+        vm.toggleAddEnvironment(.prd)
+        vm.saveElement()
+        #expect(prompts() == 1)
+        #expect(vm.suppressProductionMixWarning, "the tick in the dialog persists the choice")
+
+        vm.openAdd()
+        vm.elementForm.name = "second mix"
+        vm.toggleAddEnvironment(.prd)
+        vm.saveElement()
+        #expect(prompts() == 1, "never again means never again")
 
         let state = vm.persistableState(onboardingCompleted: true, onboardingName: "x")
         let restored = NotchboardViewModel()

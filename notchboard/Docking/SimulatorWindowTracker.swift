@@ -5,8 +5,13 @@
 //  Locates the running iOS Simulator app and tracks its frontmost window's frame via the
 //  Accessibility API, so Notchboard can dock to its real, live position/size — not a mockup.
 //
-//  Polling (rather than AXObserver notifications) is used for simplicity; it's cheap enough
-//  at a few times per second and keeps this file self-contained.
+//  Polling (rather than AXObserver notifications) is used for simplicity and because AX
+//  move notifications don't fire continuously during a live drag anyway. The rate is
+//  adaptive: a window can only be dragged while its app is frontmost and a mouse button
+//  is down, so the tracker reads at ~60Hz exactly then ("glued to the window" feedback
+//  from the first team test), 10Hz while Simulator is merely frontmost, and the original
+//  ~3Hz the rest of the time. `onUpdate` lets the owner reposition the moment a change
+//  lands instead of waiting for a timer of its own.
 //
 
 import AppKit
@@ -26,18 +31,44 @@ final class SimulatorWindowTracker {
     /// has no window, or Accessibility permission hasn't been granted yet.
     private(set) var simulatorWindowFrame: CGRect?
 
+    /// Fired whenever `isSimulatorRunning` or the window frame actually changes, so the
+    /// owner can reposition immediately — SwiftUI must NOT observe this class (CLAUDE.md),
+    /// and a callback beats making AppDelegate poll on a second timer.
+    @ObservationIgnored var onUpdate: (() -> Void)?
+
     private var timer: Timer?
+    private var lastReadAt = Date.distantPast
 
     /// True while an AX read is in flight on a background task — skips further ticks so
     /// reads never pile up behind a slow/hung Simulator process.
     private var isReadingFrame = false
 
-    func start(interval: TimeInterval = 0.35) {
+    func start() {
         stop()
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.poll()
+        // A 60Hz heartbeat whose ticks are almost always a two-comparison no-op:
+        // `desiredInterval` decides how fresh the frame needs to be right now, and only
+        // an overdue tick pays for an AX read.
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.tick()
         }
+        timer?.tolerance = 0 // coalescing would defeat the drag-follow tier
         poll()
+    }
+
+    private func tick() {
+        guard Date().timeIntervalSince(lastReadAt) >= desiredInterval else { return }
+        poll()
+    }
+
+    /// How stale the frame is allowed to be, by what the user could be doing to the
+    /// Simulator window right now.
+    private var desiredInterval: TimeInterval {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.simulatorBundleID else {
+            return 0.35 // background app: presence tracking is all that's needed
+        }
+        // Frontmost + button down is the only state a live drag can happen in — follow
+        // every tick. Frontmost alone still gets a snappy rate for keyboard/zoom moves.
+        return NSEvent.pressedMouseButtons != 0 ? 0 : 0.1
     }
 
     func stop() {
@@ -54,14 +85,21 @@ final class SimulatorWindowTracker {
     /// that reassigns identical values a few times per second would re-render any observing
     /// SwiftUI view at that rate. All poll-driven writes go through these equality guards.
     private func setRunning(_ running: Bool) {
-        if isSimulatorRunning != running { isSimulatorRunning = running }
+        if isSimulatorRunning != running {
+            isSimulatorRunning = running
+            onUpdate?()
+        }
     }
 
     private func setFrame(_ frame: CGRect?) {
-        if simulatorWindowFrame != frame { simulatorWindowFrame = frame }
+        if simulatorWindowFrame != frame {
+            simulatorWindowFrame = frame
+            onUpdate?()
+        }
     }
 
     private func poll() {
+        lastReadAt = Date()
         guard AccessibilityPermission.isTrusted else {
             setRunning(false)
             setFrame(nil)

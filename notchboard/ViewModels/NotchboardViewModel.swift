@@ -180,6 +180,9 @@ final class NotchboardViewModel {
     /// Set once the user ticks "don't warn me again" in the production-mixing dialog.
     /// Persisted: a warning you've dismissed for good should stay dismissed.
     var suppressProductionMixWarning: Bool = false
+    /// Whether notify-when-free notifications play a sound. On by default — the point of
+    /// watching an element is to be interrupted — with the off switch in Settings.
+    var notificationSoundEnabled: Bool = true
     /// Modifier for the global K/N chords. Control by default: ⌃K/⌃N collide only with the
     /// emacs-style text bindings most people never use, whereas ⌘N is New File in Xcode.
     /// See NBHotKeyModifier for the full tradeoff.
@@ -254,7 +257,8 @@ final class NotchboardViewModel {
             onboardingName: onboardingName,
             coachMarkPending: pendingCoachMark,
             hotKeyModifier: hotKeyModifier,
-            suppressProductionMixWarning: suppressProductionMixWarning
+            suppressProductionMixWarning: suppressProductionMixWarning,
+            notificationSoundEnabled: notificationSoundEnabled
         )
     }
 
@@ -285,6 +289,7 @@ final class NotchboardViewModel {
         pendingCoachMark = persisted.coachMarkPending
         hotKeyModifier = persisted.hotKeyModifier
         suppressProductionMixWarning = persisted.suppressProductionMixWarning
+        notificationSoundEnabled = persisted.notificationSoundEnabled
 
         if orphaned > 0 {
             toast("freed \(orphaned) element\(orphaned == 1 ? "" : "s") used by someone not in this catalogue", color: .amber)
@@ -319,6 +324,13 @@ final class NotchboardViewModel {
         workspace.groupOrder.reduce(0) { total, id in
             total + (workspace.groups[id]?.elements.filter(\.isClaimed).count ?? 0)
         }
+    }
+
+    /// People in the active collection's room right now, including you; nil when there is
+    /// no live room (the footer shows nothing rather than a fake count).
+    var onlineCount: Int? {
+        guard let session = activeRoomSession, session.state == .connected else { return nil }
+        return session.onlineMemberIDs.count + 1
     }
 
     var filteredElements: [NBElement] {
@@ -406,17 +418,12 @@ final class NotchboardViewModel {
     }
 
     /// Adds or removes an environment in the element form, explaining the one refusal.
+    /// Toggling is always one click — the production-mixing warning fires once, on save,
+    /// not on every chip (first team test: per-toggle prompts read as spam).
     func toggleAddEnvironment(_ env: NBEnvironment) {
         if !elementForm.toggleEnvironment(env), elementForm.environments.contains(env) {
             toast("an element needs at least one environment", color: .red)
         }
-    }
-
-    /// True when toggling `env` needs the production-mixing warning — the form knows the
-    /// combination, the view model knows whether the user has silenced it.
-    func productionMixWarningNeeded(togglingOn env: NBEnvironment) -> Bool {
-        guard !suppressProductionMixWarning else { return false }
-        return elementForm.wouldMixProduction(togglingOn: env)
     }
 
     func openNewGroup() {
@@ -582,7 +589,7 @@ final class NotchboardViewModel {
     /// notification and drop the watch. Internal because room events route through it.
     func handleElementFreed(_ element: NBElement) {
         guard watchedElementIDs.remove(element.id) != nil else { return }
-        Notifier.notifyElementFree(name: element.name)
+        Notifier.notifyElementFree(name: element.name, withSound: notificationSoundEnabled)
         toast("“\(element.name)” is now free", color: .green)
     }
 
@@ -762,11 +769,26 @@ final class NotchboardViewModel {
 
     // MARK: - Actions: add/edit element
 
+    /// Test seam for the production-mixing dialog (the deeplinkOpener pattern) — a modal
+    /// in `saveElement` would hang the suite.
+    @ObservationIgnored var confirmProductionMix: (_ elementName: String) -> EnvironmentWarningDialog.Answer
+        = EnvironmentWarningDialog.confirmProductionMix
+
     func saveElement() {
         let (trimmedName, trimmedNote, problem) = elementForm.validated(against: activeGroup.fields)
         if let problem {
             toast(problem, color: .red)
             return
+        }
+
+        // The production-mixing speed bump, once, at the moment of commitment — not on
+        // every environment chip (first team test: per-toggle prompts read as spam, and
+        // half of them interrupted combinations the user was about to change anyway).
+        if elementForm.environments.contains(.prd), elementForm.environments.count > 1,
+           !suppressProductionMixWarning {
+            let answer = confirmProductionMix(trimmedName)
+            if answer.suppressFuture { suppressProductionMixWarning = true }
+            guard answer.confirmed else { return } // stay on the form, nothing saved
         }
 
         if let editingID = elementForm.editingElementID {

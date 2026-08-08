@@ -28,7 +28,7 @@ private struct ToastRow: View {
                 .fill(toast.color.color)
                 .frame(width: 6, height: 6)
             Text(toast.message)
-                .font(NBFont.mono(9.5))
+                .font(NBFont.mono(10.5))
                 .foregroundStyle(NBColor.textFieldValue)
                 .lineLimit(2)
         }
