@@ -206,12 +206,16 @@ struct RoomAccessoryLayoutTests {
         )
         container.layoutSubtreeIfNeeded() // the force that exposed the NSStackView collapse
 
-        for (field, minimum) in [(broker, 300.0), (room, 300.0), (accountUser, 120.0), (accountPassword, 120.0), (password, 200.0)] {
-            #expect(field.frame.width >= minimum, "a field a passphrase can't fit in is the export-password bug again")
+        // Every field gets a full row now — the account pair shared one until the layout
+        // made a broker username look optional.
+        for field in [broker, room, accountUser, accountPassword] {
+            #expect(field.frame.width >= 300, "a field a passphrase can't fit in is the export-password bug again")
         }
+        #expect(password.frame.width >= 200)
         #expect(generate.frame.width >= 80)
         #expect(!password.frame.intersects(generate.frame), "the password field must not sit under the button")
-        #expect(!accountUser.frame.intersects(accountPassword.frame), "the account pair must sit side by side, not stacked")
+        #expect(!accountUser.frame.intersects(accountPassword.frame))
+        #expect(accountUser.frame.minY > accountPassword.frame.maxY, "one field per row, username above password")
     }
 
     @Test("The invite-join accessory keeps both fields wide and apart")

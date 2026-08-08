@@ -77,7 +77,7 @@ struct DetailView: View {
         Menu {
             Button("edit") { viewModel.openEdit(element) }
             Divider()
-            Button("delete…", role: .destructive) {
+            Button("delete", role: .destructive) {
                 let hasSecrets = !group.secretFieldKeys.isEmpty
                 if ElementDialogs.confirmDelete(name: element.name, hasSecrets: hasSecrets) {
                     viewModel.deleteElement(element.id)
@@ -148,8 +148,12 @@ struct DetailView: View {
         return (.clear, NBColor.textSecondary, NBColor.border)
     }
 
+    /// Ordered by how often it's pressed, not by how the code grew: the mark-and-copy pair
+    /// first, coordination in the middle, and "login on sim" last because it is the only
+    /// one carrying a caption — a grey line explaining the URL it fires, which reads as a
+    /// footnote to the whole block anywhere else (team feedback).
     private var actionsSection: some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Button {
                     viewModel.claimOrRelease(element.id)
@@ -164,12 +168,51 @@ struct DetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
                 }
                 .buttonStyle(.nbPlain)
+                .help("mark in use and copy the \(primaryFieldLabel)")
 
-                if viewModel.loginUsername(for: element) != nil {
+                // Copies one field, like its neighbour — the two together are the paste
+                // order of a login form, which the old combined "login + password" copy
+                // (both joined by a newline) could never be.
+                if viewModel.loginPassword(for: element) != nil {
+                    Button {
+                        viewModel.copyPassword(of: element)
+                    } label: {
+                        Text("copy password")
+                            .font(NBFont.ui(11))
+                            .foregroundStyle(NBColor.amber)
+                            .padding(.horizontal, 14)
+                            .frame(height: 36)
+                            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                    }
+                    .buttonStyle(.nbPlain)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help("copy the password on its own — the mark stays as it is")
+                }
+            }
+
+            // The escape hatch for a claim nobody can release. Without a backend the claimant
+            // has no way to hand it back, so this is the only path off a locked row short of
+            // deleting the element.
+            if let claim = element.claimedBy, !viewModel.isMine(claim) {
+                secondaryButton("take over from \(viewModel.memberName(claim.who).lowercased())") {
+                    viewModel.takeOver(element.id)
+                }
+            }
+
+            // Second entry point for notify-when-free (the row tooltip is the other) —
+            // only meaningful when there are teammates who might free it.
+            if let claim = element.claimedBy, !viewModel.isMine(claim), !viewModel.isSolo {
+                secondaryButton("notify me when it's free") {
+                    viewModel.notifyWhenFree(element)
+                }
+            }
+
+            if viewModel.loginUsername(for: element) != nil {
+                VStack(alignment: .leading, spacing: 4) {
                     Button {
                         viewModel.loginOnSim(element)
                     } label: {
-                        Text("⚡ login on sim")
+                        Text("login on sim")
                             .font(NBFont.ui(11))
                             .foregroundStyle(NBColor.textFieldValue)
                             .frame(maxWidth: .infinity)
@@ -177,71 +220,37 @@ struct DetailView: View {
                             .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.border, lineWidth: 1))
                     }
                     .buttonStyle(.nbPlain)
-                }
-            }
 
-            if viewModel.loginUsername(for: element) != nil {
-                Text(viewModel.resolvedDeeplinkScheme.isEmpty
-                     ? "no URL scheme yet — set one from the ▾ menu next to the collection name"
-                     : "fires \(viewModel.resolvedDeeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
-                    .font(NBFont.mono(10))
-                    .foregroundStyle(NBColor.textMuted)
-            }
-
-            // Fallback for logins the deeplink can't drive (WebView/SSO like Okta): copy the
-            // credentials and claim in one tap; release via the claim button above.
-            if viewModel.isAuthElement(element) {
-                Button {
-                    viewModel.copyAuthAndClaim(element)
-                } label: {
-                    Text("⧉ copy login + password · mark in use")
-                        .font(NBFont.ui(11))
-                        .foregroundStyle(NBColor.amber)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+                    Text(viewModel.resolvedDeeplinkScheme.isEmpty
+                         ? "no URL scheme yet — set one from the ▾ menu next to the collection name"
+                         : "fires \(viewModel.resolvedDeeplinkScheme)://debug/login?user=…\(viewModel.loginPassword(for: element) != nil ? "&pass=…" : "")")
+                        .font(NBFont.mono(10))
+                        .foregroundStyle(NBColor.textMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.nbPlain)
                 .padding(.top, 2)
             }
-
-            // The escape hatch for a claim nobody can release. Without a backend the claimant
-            // has no way to hand it back, so this is the only path off a locked row short of
-            // deleting the element.
-            if let claim = element.claimedBy, !viewModel.isMine(claim) {
-                Button {
-                    viewModel.takeOver(element.id)
-                } label: {
-                    Text("take over from \(viewModel.memberName(claim.who).lowercased())")
-                        .font(NBFont.ui(11))
-                        .foregroundStyle(NBColor.amber)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
-                }
-                .buttonStyle(.nbPlain)
-                .padding(.top, 2)
-            }
-
-            // Second entry point for notify-when-free (the row tooltip is the other) —
-            // only meaningful when there are teammates who might free it.
-            if let claim = element.claimedBy, !viewModel.isMine(claim), !viewModel.isSolo {
-                Button {
-                    viewModel.notifyWhenFree(element)
-                } label: {
-                    Text("🔔 notify me when it's free")
-                        .font(NBFont.ui(11))
-                        .foregroundStyle(NBColor.amber)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
-                }
-                .buttonStyle(.nbPlain)
-                .padding(.top, 2)
-            }
-
         }
         .padding(.top, 18)
+    }
+
+    /// What "use + copy" puts on the clipboard, for the tooltip — the first schema field,
+    /// same rule copyPrimaryField uses.
+    private var primaryFieldLabel: String {
+        group.fields.first?.label ?? "value"
+    }
+
+    private func secondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(NBFont.ui(11))
+                .foregroundStyle(NBColor.amber)
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.amber.opacity(0.4), lineWidth: 1))
+        }
+        .buttonStyle(.nbPlain)
+        .padding(.top, 2)
     }
 }
 
@@ -302,9 +311,18 @@ private struct FieldRow: View {
                 }
                 .buttonStyle(.nbPlain)
             }
-            Text("⧉")
-                .font(NBFont.mono(10))
-                .foregroundStyle(NBColor.amber)
+            // Twice the old size, and a real button: at 10pt it read as a decoration
+            // beside 10.5pt text, and the only thing that actually copied was the row's
+            // own tap gesture (which still works — this is the visible affordance for it).
+            Button(action: onCopy) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(NBColor.amber)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.nbPlain)
+            .help("copy \(label)")
         }
         .padding(11)
         .background(NBColor.field)

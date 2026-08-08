@@ -45,12 +45,10 @@ enum RoomDialogs {
             // first real user typed the example in verbatim and got a red dot and a
             // ten-second timeout. The address has to come from an actual broker.
             alert.informativeText = complaint ?? """
-            Only the person setting the room up sees this dialog — teammates just paste \
-            the invite you'll get afterwards, and type the room password. Enter the \
-            address of a real MQTT broker your team can reach (mqtts:// for TLS, wss:// \
-            through corporate firewalls), and the account credentials for managed \
-            brokers like HiveMQ Cloud — empty for brokers without auth. The room \
-            password seals everything; share it out of band, like wifi.
+            Only you fill this in — teammates just paste the invite you copy afterwards. \
+            Use your MQTT broker's address (mqtts:// for TLS, wss:// through firewalls). \
+            The account fields are for managed brokers like HiveMQ Cloud; leave them \
+            empty otherwise. Share the room password out of band, like wifi.
             """
             alert.addButton(withTitle: "Join Room")
             alert.addButton(withTitle: "Cancel")

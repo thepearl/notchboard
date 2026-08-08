@@ -838,6 +838,43 @@ with the account fields left blank keeps the existing sealed credential, so a se
 visit doesn't demand retyping. Not yet exercised by a second human — the QA plan's setup
 block (T1–T3) was rewritten around the invite and needs a fresh run.
 
+### 13.13 The polish pass (2026-08-09)
+
+Ghazi's first full run of the finished invite flow worked end to end (HiveMQ Cloud with an
+account, a second collection joining from a pasted invite, mosquitto locally), which moved
+the complaints from "does it work" to "does it feel finished". Twenty-odd findings in one
+list; the ones that changed a decision rather than a number:
+
+- **Notify-when-free never notified.** The permission prompt fired at launch, where a user
+  with no idea what the app is denies it by reflex — and a denial is only reversible in
+  System Settings. It is now asked for on the first click of "notify me when it's free",
+  and a refusal aborts the watch loudly instead of arming something that can't fire.
+- **The mystery circle.** Collapsed, the panel is 36pt wide, so any toast was clipped down
+  to its own status dot — a circle floating beside the notch that people rightly read as a
+  glitch. Toasts now render only when there is a panel to render them in; anything that
+  must reach a collapsed user goes through macOS.
+- **Two buttons that looked identical.** "use + copy" and "copy login + password · mark in
+  use" differed only in what landed on the clipboard, and the second one's two-line
+  clipboard was the wrong shape for a login form anyway. Now one button per field, in
+  paste order: "use + copy" and "copy password".
+- **"Show Panel (Undocked)" did nothing.** It was only consulted when no Simulator window
+  could be found, so with Simulator running the menu item was inert. An explicit request
+  now outranks docking.
+- **⌘, opened an empty window** — SwiftUI's own Settings scene (`EmptyView`, kept only to
+  satisfy the one-Scene requirement) claimed the shortcut app-wide. Its command group is
+  removed and the panel's key monitor answers ⌘, with the real window.
+- **Lecturing.** Every settings footer, the room dialog's preamble and the production-mix
+  warning were cut to one or two lines, and the ellipsis dropped from action labels. The
+  standing rule from this round: **explain the consequence, never the mechanism.** Nobody
+  reads the third line.
+- **A fake title bar with fake buttons.** Onboarding's three traffic lights were decoration
+  that looked exactly like controls. Red quits for real now; the other two are visibly
+  dimmed with tooltips, because a dead control that looks alive is worse than one that
+  looks unavailable.
+- **Delete-group was a button that became another button.** Confirmation belongs in an
+  alert with the element count, and the destructive action belongs in the header, not at
+  the bottom of a scroll view.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between

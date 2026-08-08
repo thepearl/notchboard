@@ -17,13 +17,19 @@ struct ElementRowView: View {
             Button {
                 viewModel.toggleFavorite(element.id)
             } label: {
+                // SF Symbols, not the ★/☆ text glyphs: those two characters have different
+                // metrics and fall back to different fonts, so the star visibly changed
+                // size when you favourited a row (team feedback: "sometimes it does get
+                // big"). One symbol in two fills can't drift.
+                //
                 // The sizing lives inside the label, not on the Button: a frame applied
                 // outside enlarges the layout slot without enlarging the hit area, so the
                 // star was only clickable on the glyph itself.
-                Text(element.isFavorite ? "★" : "☆")
-                    .font(NBFont.mono(13.5))
+                Image(systemName: element.isFavorite ? "star.fill" : "star")
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(element.isFavorite ? NBColor.amber : NBColor.textMuted)
-                    .frame(width: 20, height: 24)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.nbPlain)
             .help(element.isFavorite ? "unfavourite" : "favourite")
@@ -78,11 +84,11 @@ struct ElementRowView: View {
                 // Padding and border inside the label so the whole bordered box is the hit
                 // target. Applied outside the Button (as they were) they drew a box larger
                 // than the button, leaving most of the visible control dead.
-                Text("⧉")
-                    .font(NBFont.mono(10))
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(NBColor.textSecondary)
                     .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 5)
                     .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.border, lineWidth: 1))
             }
             .buttonStyle(.nbPlain)

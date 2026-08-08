@@ -24,3 +24,22 @@ enum ElementDialogs {
         return alert.runModal() == .alertFirstButtonReturn
     }
 }
+
+/// Same posture for a whole group: one warning alert with the count, not an inline button
+/// that turns into a second inline button (team feedback — the two-step control read as a
+/// bug, and it sat at the bottom of a scroll view where a destructive action shouldn't be).
+@MainActor
+enum GroupDialogs {
+    static func confirmDelete(label: String, elementCount: Int) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete the “\(label)” group?"
+        alert.informativeText = elementCount == 0
+            ? "It has no elements. This can't be undone from inside notchboard."
+            : "Its \(elementCount) element\(elementCount == 1 ? "" : "s") go with it, secrets included."
+        alert.addButton(withTitle: "Delete Group")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+}

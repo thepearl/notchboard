@@ -40,20 +40,24 @@ struct PanelHeaderView: View {
             // "1 members" was a team costume on a single-user tool. Its width now hosts
             // the collection switcher.
 
+            // Sized like a control, not a glyph: at 10pt in a 5x1 pad this was the panel's
+            // smallest target and nobody read it as "collapse" (team feedback).
             Button(action: onCollapse) {
-                Text("«")
-                    .font(NBFont.mono(10))
+                Image(systemName: "chevron.left.2")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(collapseHovering ? NBColor.textPrimaryAlt : NBColor.textSecondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
+                    .frame(width: 32, height: 26)
+                    .background(collapseHovering ? NBColor.rowHover : Color.clear)
                     .overlay(
                         RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius)
                             .stroke(collapseHovering ? NBColor.borderStrong : NBColor.border, lineWidth: 1)
                     )
+                    .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.nbPlain)
             .onHover { collapseHovering = $0 }
-            .help("collapse to notch")
+            .help("collapse to the notch")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 15)
@@ -83,7 +87,7 @@ struct PanelHeaderView: View {
                 }
             }
             Divider()
-            Button("new collection…") {
+            Button("new collection") {
                 if let name = CollectionDialogs.promptForName(
                     title: "New collection",
                     message: "A collection is one catalogue with its own groups and deeplink scheme."
@@ -91,7 +95,7 @@ struct PanelHeaderView: View {
                     viewModel.createCollection(named: name)
                 }
             }
-            Button("rename…") {
+            Button("rename") {
                 if let name = CollectionDialogs.promptForName(
                     title: "Rename collection",
                     message: "Renames “\(viewModel.workspace.name)”.",
@@ -107,7 +111,7 @@ struct PanelHeaderView: View {
             // The deeplink scheme is per collection, and Settings was too far from where
             // people actually notice it's missing (the detail view's login button).
             Button(viewModel.deeplinkScheme.isEmpty
-                   ? "set deeplink scheme…"
+                   ? "set deeplink scheme"
                    : "deeplink scheme: \(viewModel.resolvedDeeplinkScheme)://…") {
                 if let scheme = CollectionDialogs.promptForScheme(
                     collectionName: viewModel.workspace.name,
@@ -127,16 +131,16 @@ struct PanelHeaderView: View {
                 Button("copy room invite") {
                     viewModel.copyRoomInvite()
                 }
-                Button("leave room…") {
+                Button("leave room") {
                     viewModel.leaveRoomFromMenu()
                 }
             } else {
-                Button("join with an invite…") {
+                Button("join with an invite") {
                     viewModel.joinWithInviteFromMenu()
                 }
             }
             Divider()
-            Button("delete…") {
+            Button("delete") {
                 if CollectionDialogs.confirmDelete(
                     name: viewModel.workspace.name,
                     elementCount: viewModel.workspace.elementCount
@@ -158,12 +162,12 @@ struct PanelHeaderView: View {
     }
 
     private var roomMenuTitle: String {
-        guard let room = viewModel.activeCollection.room else { return "set up team room…" }
+        guard let room = viewModel.activeCollection.room else { return "set up team room" }
         switch viewModel.activeRoomState {
         case .connected: return "room: \(room.room) · connected"
         case .connecting: return "room: \(room.room) · connecting…"
-        case .failed: return "room: \(room.room) · unreachable — fix…"
-        default: return "room: \(room.room) · join…"
+        case .failed: return "room: \(room.room) · unreachable — fix"
+        default: return "room: \(room.room) · join"
         }
     }
 

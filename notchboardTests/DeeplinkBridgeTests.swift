@@ -134,7 +134,9 @@ struct LoginOnSimTests {
     func urlCarriesCredentials() {
         let vm = NotchboardViewModel()
         vm.deeplinkScheme = "testapp"
-        guard let element = vm.activeGroup.elements.first(where: { vm.isAuthElement($0) }) else {
+        guard let element = vm.activeGroup.elements.first(where: {
+            vm.loginUsername(for: $0) != nil && vm.loginPassword(for: $0) != nil
+        }) else {
             Issue.record("seed data has no full auth element")
             return
         }

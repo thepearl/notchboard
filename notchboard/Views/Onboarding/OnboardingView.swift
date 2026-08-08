@@ -3,6 +3,7 @@
 //  notchboard
 //
 
+import AppKit
 import SwiftUI
 
 struct OnboardingView: View {
@@ -51,11 +52,27 @@ struct OnboardingView: View {
         }
     }
 
+    /// Setup's own title bar. The three dots used to be pure decoration, which made them a
+    /// trap — they look like the system's and people click them (team feedback: "all 3
+    /// don't work"). Red now genuinely quits, and the other two are dimmed to half their
+    /// former weight with tooltips saying why: there is no window to minimise or zoom
+    /// during setup, and a button that lies is worse than one that's visibly unavailable.
     private var titleBar: some View {
         HStack(spacing: 7) {
-            Circle().fill(NBColor.trafficRed).frame(width: 10, height: 10)
-            Circle().fill(NBColor.trafficAmber).frame(width: 10, height: 10)
-            Circle().fill(NBColor.trafficGreen).frame(width: 10, height: 10)
+            Button(action: quitFromSetup) {
+                Circle()
+                    .fill(NBColor.trafficRed)
+                    .frame(width: 11, height: 11)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.nbPlain)
+            .help("quit notchboard")
+
+            Circle().fill(NBColor.trafficAmber.opacity(0.3)).frame(width: 11, height: 11)
+                .help("nothing to minimise during setup")
+            Circle().fill(NBColor.trafficGreen.opacity(0.3)).frame(width: 11, height: 11)
+                .help("setup is a fixed size")
+
             Spacer()
             Text("notchboard setup")
                 .font(NBFont.mono(10))
@@ -66,6 +83,18 @@ struct OnboardingView: View {
         .frame(height: 30)
         .background(NBColor.titleBar)
         .overlay(alignment: .bottom) { Rectangle().fill(NBColor.headerBorder).frame(height: 1) }
+    }
+
+    private func quitFromSetup() {
+        let alert = NSAlert()
+        alert.messageText = "Quit notchboard?"
+        alert.informativeText = "Setup isn't finished — nothing has been saved yet."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSApp.terminate(nil)
+        }
     }
 
     @ViewBuilder
@@ -248,7 +277,12 @@ private struct StartingPointStep: View {
                         option: option,
                         isSelected: onboarding.startingPoint == option
                     ) {
-                        onboarding.startingPoint = option
+                        // Animated on the write, not with a blanket .animation on the
+                        // container: the fields below slide out of the chosen card
+                        // instead of appearing from nowhere mid-step.
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            onboarding.startingPoint = option
+                        }
                     }
                 }
             }
@@ -262,6 +296,7 @@ private struct StartingPointStep: View {
                     joinSecureField("", text: $onboarding.roomPassword, prompt: "room password (shared separately)")
                 }
                 .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             Spacer()

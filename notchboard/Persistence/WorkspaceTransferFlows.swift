@@ -48,23 +48,40 @@ enum PromptAccessory {
         return container
     }
 
-    /// The room-setup form: broker address, room name, the broker account pair (side by
-    /// side — empty for brokers without auth), and the room password + Generate. Same
-    /// fixed frames, stacked by hand, rows 30pt apart top-down.
+    /// The room-setup form: broker address, room name, the broker account pair, and the
+    /// room password + Generate, with a one-line warning under it. Same fixed frames,
+    /// stacked by hand, one field per row 30pt apart top-down — the account pair shared a
+    /// row until the first team test, where half-width fields made a broker username look
+    /// like an optional afterthought rather than a field to fill in.
     static func roomSetup(broker: NSTextField, room: NSTextField,
                           accountUser: NSTextField, accountPassword: NSTextField,
                           password: NSTextField, generate: NSButton) -> NSView {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 120))
-        broker.frame = NSRect(x: 0, y: 93, width: 338, height: 24)
-        room.frame = NSRect(x: 0, y: 63, width: 338, height: 24)
-        accountUser.frame = NSRect(x: 0, y: 33, width: 165, height: 24)
-        accountPassword.frame = NSRect(x: 173, y: 33, width: 165, height: 24)
-        password.frame = NSRect(x: 0, y: 3, width: 232, height: 24)
-        generate.frame = NSRect(x: 240, y: 0, width: 98, height: 30)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 174))
+        broker.frame = NSRect(x: 0, y: 148, width: 338, height: 24)
+        room.frame = NSRect(x: 0, y: 118, width: 338, height: 24)
+        accountUser.frame = NSRect(x: 0, y: 88, width: 338, height: 24)
+        accountPassword.frame = NSRect(x: 0, y: 58, width: 338, height: 24)
+        password.frame = NSRect(x: 0, y: 28, width: 232, height: 24)
+        generate.frame = NSRect(x: 240, y: 25, width: 98, height: 30)
         for field in [broker, room, accountUser, accountPassword, password, generate] {
             container.addSubview(field)
         }
+        // The room password is never displayed again anywhere in the app — it goes
+        // straight to the Keychain — so the one moment it is on screen has to say so.
+        let note = makeNote("Copy this password now — it is never shown again.")
+        note.frame = NSRect(x: 0, y: 4, width: 338, height: 16)
+        container.addSubview(note)
         return container
+    }
+
+    /// A small secondary caption for a prompt accessory. Non-editable, non-selectable, so
+    /// it reads as label chrome rather than a field the user should be filling in.
+    static func makeNote(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 10)
+        label.textColor = .secondaryLabelColor
+        label.isSelectable = false
+        return label
     }
 
     /// The invite-join prompt's fields: the pasted invite line above the room password.

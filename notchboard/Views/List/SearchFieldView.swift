@@ -42,7 +42,7 @@ struct SearchFieldView: View {
             // "user" alone didn't say a new *entry* was being created. Exactly the
             // field's height (NBMetrics.controlHeight) — also literal feedback.
             Button(action: viewModel.openAdd) {
-                Text("＋ new \(viewModel.activeGroup.singular) entry")
+                Text(addButtonLabel)
                     .font(NBFont.ui(14, weight: .semibold))
                     .foregroundStyle(NBColor.background)
                     .padding(.horizontal, 10)
@@ -55,10 +55,23 @@ struct SearchFieldView: View {
             .fixedSize(horizontal: true, vertical: false)
             .help("add a new \(viewModel.activeGroup.singular) entry (\(viewModel.hotKeyModifier.symbolPrefix)N)")
         }
+
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .onChange(of: viewModel.searchFocusToken) {
             isFocused.wrappedValue = true
         }
     }
+
+    /// The button hugs its text, so a long group name ate the search field beside it
+    /// ("＋ new fidelity card entry"). Past a short name the noun is dropped rather than
+    /// the layout: "users" keeps "＋ new user entry", anything longer becomes generic.
+    private var addButtonLabel: String {
+        let singular = viewModel.activeGroup.singular
+        return singular.count <= Self.maxSingularInLabel
+            ? "＋ new \(singular) entry"
+            : "＋ new entry"
+    }
+
+    private static let maxSingularInLabel = 8
 }

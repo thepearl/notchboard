@@ -11,7 +11,6 @@ struct NewGroupView: View {
     /// The schema draft, bound directly — this view edits a group's shape, not the app.
     @Bindable var draft: GroupFormModel
 
-    @State private var confirmingDelete = false
     /// The field currently being dragged by its ⋮⋮ handle (vision §5.5 reorderable list).
     @State private var draggedFieldID: UUID?
 
@@ -31,21 +30,43 @@ struct NewGroupView: View {
                 fieldsSection
                 Spacer(minLength: 20)
                 actions
-                if isEditing {
-                    deleteSection
-                }
             }
             .padding(19)
         }
     }
 
+    /// Delete sits on the header line, opposite the back button — where a destructive
+    /// action for the whole screen belongs. It used to live at the bottom of the scroll
+    /// view as a button that turned into a second button ("really delete…?"), which read
+    /// as a glitch rather than a confirmation; the alert does that job now.
     private var header: some View {
         HStack(spacing: 9) {
             NBBackButton(action: viewModel.backToList)
             Text(isEditing ? "edit group" : "new group")
                 .font(NBFont.ui(13, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
+            Spacer()
+            if isEditing {
+                Button(action: deleteGroup) {
+                    Text("delete group")
+                        .font(NBFont.mono(10))
+                        .foregroundStyle(NBColor.red)
+                        .padding(.horizontal, 9)
+                        .frame(height: 24)
+                        .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.red.opacity(0.35), lineWidth: 1))
+                }
+                .buttonStyle(.nbPlain)
+                .help("delete this group and everything in it")
+            }
         }
+    }
+
+    private func deleteGroup() {
+        guard GroupDialogs.confirmDelete(
+            label: viewModel.activeGroup.label,
+            elementCount: viewModel.activeGroup.elements.count
+        ) else { return }
+        viewModel.deleteGroup(draft.editingGroupID ?? "")
     }
 
     private var nameField: some View {
@@ -95,31 +116,6 @@ struct NewGroupView: View {
             .buttonStyle(.nbPlain)
             .padding(.top, 2)
         }
-    }
-
-    private var deleteSection: some View {
-        let elementCount = viewModel.activeGroup.elements.count
-        return HStack {
-            Spacer()
-            Button {
-                if confirmingDelete {
-                    viewModel.deleteGroup(draft.editingGroupID ?? "")
-                } else {
-                    confirmingDelete = true
-                }
-            } label: {
-                Text(confirmingDelete
-                     ? "really delete “\(viewModel.activeGroup.label)” and its \(elementCount) element\(elementCount == 1 ? "" : "s")?"
-                     : "delete group…")
-                    .font(NBFont.mono(10))
-                    .foregroundStyle(NBColor.red)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.red.opacity(confirmingDelete ? 0.8 : 0.35), lineWidth: 1))
-            }
-            .buttonStyle(.nbPlain)
-        }
-        .padding(.top, 14)
     }
 
     private var actions: some View {

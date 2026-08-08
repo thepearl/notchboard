@@ -32,14 +32,14 @@ struct SettingsView: View {
                     Text("Auto-release in-use elements after \(viewModel.autoReleaseMinutes) min idle")
                 }
 
+                // No explanatory paragraph under this picker. It used to carry a note about
+                // what each chord costs you elsewhere in macOS; people pick a shortcut and
+                // change it if it clashes.
                 Picker("Global shortcut", selection: $viewModel.hotKeyModifier) {
                     ForEach(NBHotKeyModifier.allCases) { modifier in
                         Text(modifier.label).tag(modifier)
                     }
                 }
-                Text(viewModel.hotKeyModifier.costNote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 Toggle("Play a sound with notifications", isOn: $viewModel.notificationSoundEnabled)
 
@@ -61,7 +61,7 @@ struct SettingsView: View {
                         Text("Pending your approval in Login Items")
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Open Login Items…") {
+                        Button("Open Login Items") {
                             LaunchAtLogin.openSystemSettings()
                         }
                     }
@@ -71,11 +71,14 @@ struct SettingsView: View {
             Section {
                 TextField("Debug URL scheme", text: $viewModel.deeplinkScheme, prompt: Text("e.g. notchdemo"))
                     .onSubmit { viewModel.setDeeplinkScheme(viewModel.deeplinkScheme) }
-                Toggle("Warn before mixing production with another environment", isOn: $viewModel.suppressProductionMixWarning.inverted)
+                Toggle(isOn: $viewModel.suppressProductionMixWarning.inverted) {
+                    Text("Warn before mixing production with another environment")
+                    Text("Asked once, when you save.")
+                }
             } header: {
                 Text("Simulator deeplink — “\(viewModel.workspace.name)”")
             } footer: {
-                Text("“Login on sim” fires <scheme>://debug/login?user=<username> into the booted Simulator via xcrun simctl. Your app's debug build must register this URL scheme and handle that route. Stored per collection: each catalogue describes one app, so switching collections switches the app you deeplink into.")
+                Text("Your app's debug build must register this scheme and handle /debug/login. One scheme per collection.")
                     .foregroundStyle(.secondary)
             }
 
@@ -83,23 +86,21 @@ struct SettingsView: View {
                 if let room = viewModel.activeCollection.room {
                     LabeledContent("Room", value: "\(room.room) @ \(room.brokerHost ?? room.brokerURL)")
                     LabeledContent("Status", value: roomStatusText)
-                    Button("Leave Room…") { viewModel.leaveRoomFromMenu() }
+                    Button("Leave Room") { viewModel.leaveRoomFromMenu() }
                 } else {
-                    Text("This collection is local — no team room. Set one up from the collection's ▾ menu in the panel.")
+                    Text("Local — no team room.")
                         .foregroundStyle(.secondary)
+                    Button("Join with an Invite") { viewModel.joinWithInviteFromMenu() }
                 }
             } header: {
                 Text("Team room — “\(viewModel.workspace.name)”")
             } footer: {
-                Text("Everything published to the room is encrypted under the room password; the broker relays bytes it can't read. Honest limitation: removing someone means rotating the room password and sharing the new one — there is no server to revoke them from, and rotation can't take back what they already have.")
+                Text("Everything in the room is encrypted under the room password. Removing someone means rotating it.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
-                Button("Replay Onboarding…", action: onReplayOnboarding)
-            } footer: {
-                Text("Notchboard docks to the real iOS Simulator window via the macOS Accessibility API. It hides automatically when Simulator quits, is closed, or is minimized/hidden, and redocks the moment it's visible again.")
-                    .foregroundStyle(.secondary)
+                Button("Replay Onboarding", action: onReplayOnboarding)
             }
         }
         .formStyle(.grouped)

@@ -42,9 +42,15 @@ struct NotchboardSceneView: View {
         // read as a stray rectangle rather than an affordance. The Settings window is a
         // separate, ordinary window and keeps its native rings.
         .focusEffectDisabled()
+        // Toasts only exist where there is room for one. Collapsed, the panel is 36pt
+        // wide, so a toast rendered here was clipped down to its own status dot — a
+        // mystery circle floating beside the notch (team feedback). Anything that must
+        // reach the user while collapsed goes through a macOS notification instead.
         .overlay(alignment: .bottomTrailing) {
-            ToastStackView(toasts: viewModel.toasts)
-                .padding(14)
+            if viewModel.isExpanded || onboarding.isPresented {
+                ToastStackView(toasts: viewModel.toasts)
+                    .padding(14)
+            }
         }
         .onKeyPress(.escape) {
             guard !onboarding.isPresented else { return .ignored }
@@ -201,6 +207,10 @@ struct NotchboardSceneView: View {
         viewModel.showCoachMark = tracker.isSimulatorRunning
         viewModel.pendingCoachMark = !tracker.isSimulatorRunning
         viewModel.isExpanded = false
+        // The coach mark and a toast are two messages fighting for the same corner of a
+        // panel barely wider than the notch, and the coach mark already says the useful
+        // half. Whichever is showing, only one speaks.
+        guard !viewModel.showCoachMark else { return }
         // Speaks to what the user actually chose, with real numbers, and never claims to have
         // "joined" anything — there is nothing to join.
         switch onboarding.startingPoint {

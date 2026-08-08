@@ -49,7 +49,7 @@ enum NBStartingPoint: String, CaseIterable, Identifiable {
         switch self {
         case .sample: return "load sample data →"
         case .empty: return "start empty →"
-        case .importFile: return "choose file… →"
+        case .importFile: return "choose file →"
         case .joinTeam: return "join the room →"
         }
     }

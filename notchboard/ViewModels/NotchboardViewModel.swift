@@ -638,9 +638,23 @@ final class NotchboardViewModel {
         revealedFieldKeys.contains("\(elementID).\(fieldKey)")
     }
 
+    /// Arms a watch — but only once the system will actually let us deliver it. The panel
+    /// is usually collapsed to a 36pt notch when the news arrives, so a macOS notification
+    /// is the whole feature, not a garnish on a toast: with permission refused there is
+    /// nothing to arm, and the action aborts loudly instead of pretending.
     func notifyWhenFree(_ element: NBElement) {
-        watchedElementIDs.insert(element.id)
-        toast("you'll be pinged when “\(element.name)” is free", color: .green)
+        Task { [weak self] in
+            let permission = await Notifier.authorize()
+            guard let self else { return }
+            switch permission {
+            case .granted, .unavailable:
+                self.watchedElementIDs.insert(element.id)
+                self.toast("you'll be notified when “\(element.name)” is free", color: .green)
+            case .denied:
+                self.toast("notifications are off for notchboard — turn them on in System Settings", color: .red)
+                Notifier.openSystemSettings()
+            }
+        }
     }
 
     /// Called whenever an element's mark is cleared — manual release, auto-release, a
@@ -685,12 +699,6 @@ final class NotchboardViewModel {
         guard let key = activeGroup.secretFieldKeys.first,
               let password = element.values[key], !password.isEmpty else { return nil }
         return password
-    }
-
-    /// True when an element carries enough to be treated as an auth credential — a username
-    /// plus a secret. Drives the auth-specific buttons (deeplink + copy-and-mark).
-    func isAuthElement(_ element: NBElement) -> Bool {
-        loginUsername(for: element) != nil && loginPassword(for: element) != nil
     }
 
     /// The configured scheme, normalised (see NBDeeplinkScheme).
@@ -779,26 +787,16 @@ final class NotchboardViewModel {
     /// the element in use. This is the fallback for logins the deeplink can't drive —
     /// WebView/SSO screens (Okta and the like) — where the user pastes the credentials by
     /// hand but still wants the element marked so teammates don't collide.
-    func copyAuthAndClaim(_ element: NBElement) {
-        let login = loginUsername(for: element) ?? element.name
-        if let password = loginPassword(for: element) {
-            copy("\(login)\n\(password)", label: "login + password", concealed: true)
-        } else {
-            copy(login, label: "login")
-        }
-
-        switch selectedElement(id: element.id)?.claimedBy {
-        case nil:
-            store.setClaim(NBClaim(who: selfMemberID), elementID: element.id,
-                           group: activeGroupID, collection: activeCollectionID,
-                           claimantName: selfClaimLabel)
-            store.mutate(element.id, in: activeGroupID) { $0.lastUsed = "just now, by \(selfClaimLabel)" }
-            toast("marked “\(element.name)” in use", color: .green)
-        case .some(let claim) where isMine(claim):
-            break // already yours; the copy toast is enough
-        case .some(let claim):
-            toast("\(memberName(claim.who)) has this — coordinate before using", color: .amber)
-        }
+    /// Copies just the password, concealed, with no effect on the mark.
+    ///
+    /// This replaced a second "copy login + password · mark in use" button that sat next to
+    /// "use + copy" and read as its twin (team feedback: "they seem like the same thing").
+    /// They weren't — one copied the username, the other copied both joined by a newline —
+    /// but a two-line clipboard is the wrong shape for a login form anyway. Two buttons
+    /// that copy one field each, in the order you paste them, is the honest split.
+    func copyPassword(of element: NBElement) {
+        guard let password = loginPassword(for: element) else { return }
+        copy(password, label: "password", concealed: true)
     }
 
     /// Internal (not private) so tests can drive the sweep deterministically instead of

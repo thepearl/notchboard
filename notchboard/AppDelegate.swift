@@ -108,7 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setUpPanel()
         setUpStatusItem()
         installGlobalShortcuts()
-        Notifier.requestAuthorization()
+        // No notification prompt here. It is asked for the first time the user clicks
+        // "notify me when it's free" — a permission dialog before any expressed interest
+        // gets denied by reflex, and that denial is only reversible in System Settings.
 
         // The panel repositions the moment the tracker lands a change — during a drag the
         // tracker reads at ~60Hz, and waiting for a timer of our own is where the old
@@ -274,13 +276,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fallbackItem = makeItem("Show Panel (Undocked)", #selector(toggleFallbackFromMenu), key: "")
         menu.addItem(fallbackItem)
         fallbackMenuItem = fallbackItem
-        menu.addItem(makeItem("Replay Onboarding…", #selector(replayOnboardingFromMenu), key: ""))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Export Collection…", #selector(exportCollectionFromMenu), key: ""))
-        menu.addItem(makeItem("Import Collections…", #selector(importCollectionsFromMenu), key: ""))
-        menu.addItem(makeItem("Restore Snapshot…", #selector(restoreSnapshotFromMenu), key: ""))
+        // Joining sits with import/export because that is what it replaced: the room is
+        // reached with a pasted invite now, not a file (vision.md §13.12).
+        menu.addItem(makeItem("Join Room with Invite", #selector(joinRoomWithInviteFromMenu), key: ""))
+        menu.addItem(makeItem("Export Collection", #selector(exportCollectionFromMenu), key: ""))
+        menu.addItem(makeItem("Import Collections", #selector(importCollectionsFromMenu), key: ""))
+        menu.addItem(makeItem("Restore Snapshot", #selector(restoreSnapshotFromMenu), key: ""))
         menu.addItem(.separator())
-        menu.addItem(makeItem("Settings…", #selector(openSettingsFromMenu), key: ","))
+        menu.addItem(makeItem("Settings", #selector(openSettingsFromMenu), key: ","))
         menu.addItem(.separator())
         menu.addItem(makeItem("Quit Notchboard", #selector(quitFromMenu), key: "q"))
 
@@ -298,9 +302,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.toggleExpanded()
     }
 
-    @objc private func replayOnboardingFromMenu() {
-        onboarding.reset()
-        viewModel.replayOnboarding()
+    @objc private func joinRoomWithInviteFromMenu() {
+        viewModel.joinWithInviteFromMenu()
     }
 
     @objc private func toggleFallbackFromMenu() {
@@ -309,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setFallbackVisible(_ visible: Bool) {
         fallbackPanelVisible = visible
-        fallbackMenuItem?.title = visible ? "Hide Undocked Panel" : "Show Panel (Undocked)"
+        fallbackMenuItem?.title = visible ? "Dock to Simulator Again" : "Show Panel (Undocked)"
         if visible {
             viewModel.isExpanded = true
             viewModel.showCoachMark = false
@@ -532,6 +535,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Only when the panel itself is focused — a ⌘N typed into the Settings window (or any
         // future window) must reach that window, not be swallowed here.
         guard event.window === panel else { return false }
+
+        // ⌘, before the onboarding/interactable gate: settings must be reachable from the
+        // panel at any time, and this is the only thing answering that chord now that the
+        // SwiftUI Settings scene's command group is gone (see notchboardApp).
+        if modifiers == .command, event.charactersIgnoringModifiers == "," {
+            openSettingsFromMenu()
+            return true
+        }
         guard !onboarding.isPresented, panelIsInteractable else { return false }
 
         switch event.charactersIgnoringModifiers?.lowercased() {
@@ -610,16 +621,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Docked to Simulator: once onboarded, Notchboard normally only exists alongside a
-        // running, visible Simulator window — unless the user asked for the undocked
-        // fallback from the menu bar. The instant Simulator is visible again, docking
-        // takes precedence and the panel snaps back to its edge.
+        // "Show Panel (Undocked)" is a request, not a fallback, and it outranks docking.
+        // It used to be checked only when no Simulator window could be found, so with
+        // Simulator running the menu item silently did nothing — which is exactly how it
+        // read to the first team ("doesn't seem to do anything at all"). Docking resumes
+        // when the user asks for it back, not the moment Simulator reappears.
+        if fallbackPanelVisible {
+            layoutFallbackPanel(panel)
+            return
+        }
+
+        // Docked to Simulator: once onboarded, Notchboard only exists alongside a running,
+        // visible Simulator window.
         guard tracker.isSimulatorRunning, let simFrame = tracker.simulatorWindowFrame else {
-            if fallbackPanelVisible {
-                layoutFallbackPanel(panel)
-            } else {
-                hide(panel)
-            }
+            hide(panel)
             return
         }
         panel.isMovableByWindowBackground = false
@@ -683,9 +698,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reposition would fight the drag. Collapsing while undocked dismisses the panel,
     /// since a notch docked to nothing makes no sense.
     private func layoutFallbackPanel(_ panel: NSPanel) {
+        // Collapsing an undocked panel means "go back to the normal rules": redock to
+        // Simulator as a notch if there is one, and otherwise dismiss (a notch docked to
+        // nothing makes no sense) — re-expanded, so the next dock isn't a stranded notch.
         guard viewModel.isExpanded else {
+            let canDock = tracker.isSimulatorRunning && tracker.simulatorWindowFrame != nil
             setFallbackVisible(false)
-            viewModel.isExpanded = true
+            if !canDock { viewModel.isExpanded = true }
             return
         }
         show(panel)
