@@ -44,11 +44,12 @@ example `sqli-mob-x7k2q`. The host generates the room password with the Generate
 and shares it over a separate channel (Slack DM is fine — never in the same message as
 the exported file).
 
-Brokers with their own account (HiveMQ Cloud, a hardened company mosquitto) work too:
-put the account username and password in the two broker fields of the room dialog. For
-HiveMQ Cloud, create the credentials under Access Management first and use the TLS MQTT
-URL as `mqtts://<broker-id>.s1.eu.hivemq.cloud:8883`. The username travels inside
-exports with the address; both passwords are shared out of band.
+Brokers with their own account (HiveMQ Cloud, a hardened company mosquitto) work too,
+and only the HOST ever deals with that: put the account username and password in the two
+broker fields of the room dialog, once. For HiveMQ Cloud, create the credentials under
+Access Management first and use the TLS MQTT URL as
+`mqtts://<broker-id>.s1.eu.hivemq.cloud:8883`. The credential travels inside the invite,
+sealed under the room password — joiners never see a broker field and never type it.
 
 ---
 
@@ -66,17 +67,18 @@ Expected: a "joining…" toast, then within a few seconds a "room connected · 1
 toast, the small square in the header turns green, and the menu item now reads
 "room: <name> · connected".
 
-**T2 — the file is the invitation**
-Host: menu bar icon → export the collection, set an export password (different from the
-room password), send the `.notchboard` file to the joiners. Share the export password and
-the room password separately.
-Expected: the file sends like any attachment. Open it in a text editor first: you should
-see the broker address and room name in plaintext, and no room password anywhere.
+**T2 — the invite is one line**
+Host: collection ▾ menu → "copy room invite" → paste it into Slack. Share the room
+password in a separate message.
+Expected: one `notchboard-room:…` line, no file. It contains no readable secrets (it's
+base64 — decode it if you're curious: broker address and room name are there, the broker
+credential is ciphertext, the room password is nowhere).
 
-**T3 — joiner imports and joins**
-Joiner: double-click the `.notchboard` file (or menu bar → import) → enter the export
-password → a "join the room as <your name>?" prompt appears → enter the room password →
-Join.
+**T3 — joiner pastes and joins**
+Joiner: collection ▾ menu → "join with an invite…" → paste the line → type the room
+password → Join. (A brand-new user can do the same during onboarding via the
+"join a team room" starting point.) Count what you typed: it should be exactly one
+password, even on a broker that requires an account.
 Expected: a toast saying you joined and adopted the room's catalogue (your local copy was
 snapshotted first), the dot turns green, and your panel now shows exactly the host's
 groups and elements — including secret values, revealed by the eye icon.

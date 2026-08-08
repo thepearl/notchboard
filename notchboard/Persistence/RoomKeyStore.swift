@@ -2,9 +2,10 @@
 //  RoomKeyStore.swift
 //  notchboard
 //
-//  Keychain home for room secrets: the room password (derives the payload key, shared
-//  like a wifi password) and the broker credential (persona 2's shared user/pass), one
-//  pair per broker+room.
+//  Keychain home for the room password (derives the payload key, shared like a wifi
+//  password), one per broker+room. Deliberately the ONLY room secret this Mac stores:
+//  the broker account's password travels sealed inside NBRoomConfig (the invite), so
+//  storing a plaintext copy here would just be a second, driftable source of truth.
 //
 //  Its own service, deliberately: SecretsStore.pruneOrphans enumerates and deletes within
 //  *its* service keyed off element ids, and a room password must never be collateral of
@@ -40,30 +41,11 @@ enum RoomKeyStore {
         return load(account: account)
     }
 
-    // MARK: - Broker account credential
-    //
-    // Persona 2's shared broker account (§14.3 — HiveMQ Cloud, a hardened mosquitto).
-    // The username travels inside the broker URL (it's shared, like the address); this
-    // password never travels, exactly like the room password.
-
-    @discardableResult
-    static func saveBrokerPassword(_ password: String, for config: NBRoomConfig) -> Bool {
-        guard let account = account(for: config, kind: "broker") else { return false }
-        return save(password, account: account)
-    }
-
-    static func brokerPassword(for config: NBRoomConfig) -> String? {
-        guard let account = account(for: config, kind: "broker") else { return nil }
-        return load(account: account)
-    }
-
     /// Leave-room and collection-delete both come through here: a password for a room
     /// this Mac no longer belongs to is pure liability.
     static func deletePasswords(for config: NBRoomConfig) {
-        for kind in ["room", "broker"] {
-            guard let account = account(for: config, kind: kind) else { continue }
-            SecItemDelete(baseQuery(account: account) as CFDictionary)
-        }
+        guard let account = account(for: config, kind: "room") else { return }
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
     }
 
     // MARK: - Plumbing

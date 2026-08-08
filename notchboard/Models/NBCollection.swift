@@ -16,18 +16,23 @@
 
 import Foundation
 
-/// Where a collection's team room lives (vision.md §14.2/§14.3). The address is shareable
-/// — it travels inside exports so a teammate's import can offer "join as <name>?" — but
-/// the room password never sits here: it lives in the Keychain (RoomKeyStore), shared out
-/// of band like a wifi password.
+/// Where a collection's team room lives (vision.md §14.2/§14.3). This whole struct is
+/// shareable — it IS the invite (RoomInvite base64s it) and it travels inside exports —
+/// because nothing in it is usable without the room password, which never sits here: it
+/// lives in the Keychain (RoomKeyStore), shared out of band like a wifi password.
 struct NBRoomConfig: Codable, Equatable {
     /// Broker address: "mqtts://host[:8883]" or "wss://host[:443]/path" (the
     /// corp-firewall fallback). May carry a username ("mqtts://user@host") for brokers
-    /// with shared credentials; the broker password joins the room password in the
-    /// Keychain.
+    /// with shared credentials.
     var brokerURL: String
     /// Room slug — one room per collection, so this names the collection on the broker.
     var room: String
+    /// The broker account's password, AES-GCM sealed under the room key — nil for brokers
+    /// without auth. The host types it once at setup; sealed, it can travel in invites and
+    /// exports, and only room-password holders can open it (the §14.3 trust model: the
+    /// account is team-shared). Sealing/unsealing is SyncEngine's job, because both need
+    /// the derived key.
+    var sealedBrokerPassword: Data?
     /// Gates the first-connect asymmetry: false means this Mac has never merged with the
     /// room, so a non-empty room replaces the local copy (after a forced snapshot) instead
     /// of merging — the rule that keeps two teammates who imported the same file from

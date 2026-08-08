@@ -43,8 +43,8 @@ struct PeerHarnessTests {
             collectionID = collection.id
             store = CollectionStore(collections: [collection])
             store.selfMemberID = memberID
-            engine = SyncEngine(store: store, selfMemberID: memberID, selfName: name) { config in
-                MQTTSyncTransport(config: config, memberID: memberID)
+            engine = SyncEngine(store: store, selfMemberID: memberID, selfName: name) { config, brokerPassword in
+                MQTTSyncTransport(config: config, memberID: memberID, brokerPassword: brokerPassword)
             }
             store.changeSink = { [weak engine = engine] change in engine?.handleLocalChange(change) }
             engine.onEvent = { [weak self] _, event in self?.events.append(event) }

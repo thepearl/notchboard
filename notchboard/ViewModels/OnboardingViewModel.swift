@@ -6,12 +6,15 @@
 import Foundation
 import Observation
 
-/// How a new user's first catalogue gets filled. Replaces the old invite-code step: a team
-/// is an upgrade, not a prerequisite, so nothing here gates on one existing.
+/// How a new user's first catalogue gets filled. A team is an upgrade, not a
+/// prerequisite — but since the room landed, joining one IS a starting point: paste the
+/// invite a teammate sent, type the room password, and the team's catalogue is yours
+/// (vision.md §14.3, revised 2026-08-08).
 enum NBStartingPoint: String, CaseIterable, Identifiable {
     case sample
     case empty
     case importFile
+    case joinTeam
 
     var id: String { rawValue }
 
@@ -20,6 +23,7 @@ enum NBStartingPoint: String, CaseIterable, Identifiable {
         case .sample: return "sample catalogue"
         case .empty: return "empty catalogue"
         case .importFile: return "import a collection file"
+        case .joinTeam: return "join a team room"
         }
     }
 
@@ -28,6 +32,7 @@ enum NBStartingPoint: String, CaseIterable, Identifiable {
         case .sample: return "4 groups · 20 elements to poke at"
         case .empty: return "one “users” group, nothing in it"
         case .importFile: return "exported from another mac · secrets aren't included"
+        case .joinTeam: return "paste the invite a teammate sent · one password"
         }
     }
 
@@ -36,6 +41,7 @@ enum NBStartingPoint: String, CaseIterable, Identifiable {
         case .sample: return "▣"
         case .empty: return "＋"
         case .importFile: return "⇥"
+        case .joinTeam: return "⇄"
         }
     }
 
@@ -44,6 +50,7 @@ enum NBStartingPoint: String, CaseIterable, Identifiable {
         case .sample: return "load sample data →"
         case .empty: return "start empty →"
         case .importFile: return "choose file… →"
+        case .joinTeam: return "join the room →"
         }
     }
 }
@@ -57,6 +64,10 @@ final class OnboardingViewModel {
     /// Which starting point the user picked on step 3. Sample is the default because an
     /// empty panel teaches nothing on first launch.
     var startingPoint: NBStartingPoint = .sample
+    /// The join-a-team starting point's two inputs. Held here, applied by the scene's
+    /// applyStartingPoint — the same seam every other starting point goes through.
+    var inviteText: String = ""
+    var roomPassword: String = ""
 
     var initials: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,6 +87,8 @@ final class OnboardingViewModel {
         name = ""
         accessibilityGranted = false
         startingPoint = .sample
+        inviteText = ""
+        roomPassword = ""
     }
 
     enum AdvanceResult {

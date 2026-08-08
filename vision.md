@@ -800,6 +800,44 @@ that, each sample is a short ease-out glide rather than a snap — retargeting m
 interpolates the discrete AX samples into one continuous motion. Docked movement now
 reads as part of the Simulator window rather than something chasing it.
 
+### 13.12 One password to join: the invite redesign (2026-08-08)
+
+The HiveMQ Cloud test (the first broker requiring an account) exposed the flow the
+passwords had quietly piled up into: joining a team took a file plus three passwords in a
+row — export, room, broker — and Ghazi's verdict was the right one: "people will leave if
+it's so hard." Each password had a locally-good reason; nobody had re-run the joiner's
+end-to-end experience since the room landed.
+
+The fix came from noticing that §14.3's "the file is the invitation" predates the sync
+implementation. The room already holds the whole catalogue as retained messages, secrets
+sealed inside — a joiner with an empty collection adopts everything on first connect, so
+the file was dead weight in the join path. Three moves, all shipped and tested the same
+day (274 tests, invitee flow proven by an engine receiving the broker credential it was
+never given in plaintext):
+
+- **The broker password stops being everyone's problem.** It gates transport, not content
+  (payloads are E2EE regardless), and the whole team shares one broker account by design
+  (§14.3) — so it now lives AES-GCM-sealed under the room key inside `NBRoomConfig`,
+  typed once by the host, unsealed by each joiner's engine. It travels in invites and
+  exports as ciphertext; the Keychain's "broker" kind is gone. Bonus: a wrong room
+  password now fails instantly (the seal won't open) before any connection attempt, so a
+  bad join can't hammer the team's broker account.
+- **The invite replaces the file.** One paste-able line (`notchboard-room:` + base64url
+  of the room config) copied from the ▾ menu, carrying address, room and sealed
+  credential. A joiner pastes it — via the menu's "join with an invite…", or the new
+  onboarding starting point "join a team room" — and types exactly one password. The
+  export file remains what it always really was: a backup, and the no-room sharing path.
+- **Room password and file password stay separate — but never meet.** Merging them
+  (rejected §14.7 idea) would make every backup file a room key. Instead each appears in
+  exactly one flow, and the export prompt now says "file password" so three unrelated
+  secrets stop all being "the password".
+
+Joiner cost went from four artifacts to two (invite + room password); host invitation
+went from export-and-share-three-secrets to copy-invite-and-share-one. Re-running setup
+with the account fields left blank keeps the existing sealed credential, so a settings
+visit doesn't demand retyping. Not yet exercised by a second human — the QA plan's setup
+block (T1–T3) was rewritten around the invite and needs a fresh run.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between
@@ -874,12 +912,15 @@ offered), so a second Mac is import-plus-password, not retyping every credential
 
 **Team without infra — fifteen minutes once, two minutes per teammate.** One person creates a
 free instance on a managed MQTT tier (guide provided), creates one shared username/password,
-and pastes broker address plus credentials into collection settings; the dot turns green.
-They export the collection and post the file in Slack — the file carries the room address,
-never the room password, which is shared like a wifi password. Teammates import the file
-during onboarding, get the "join as <name>?" prompt, and type the room password once (the
-Keychain keeps it). Catalogue, schema changes, claims and presence propagate live within
-about a second. A closed lid frees that member's claims within a minute or two.
+and types broker address plus credentials into the room dialog once — the only person who
+ever sees those fields; the dot turns green. They copy the room invite (one paste-able line
+carrying the address, room name, and the broker credential sealed under the room key) and
+share it with the room password, which travels out of band like a wifi password. Teammates
+paste the invite — during onboarding ("join a team room") or from the ▾ menu — type that one
+password, and adopt the room's catalogue on first connect; no file changes hands. *(Revised
+2026-08-08, §13.12 — originally the export file was the invitation, which stacked three
+passwords onto every joiner.)* Catalogue, schema changes, claims and presence propagate live
+within about a second. A closed lid frees that member's claims within a minute or two.
 Notify-when-free notifies for real.
 
 **Team with infra — same product, different URL.** Ops runs the shipped compose file
@@ -960,7 +1001,13 @@ is already its API spec. Until then, no server.
   or keep them separate?~~ **Decided 2026-08-07: separate.** Rotating the room password
   (the only way to remove a leaver) must never invalidate previously shared export
   files, and vice versa. The HKDF info strings differ (`nb-export` / `nb-room`), so even
-  an accidentally reused password yields unrelated keys.
+  an accidentally reused password yields unrelated keys. *(Re-affirmed 2026-08-08 under
+  three-passwords pressure, §13.12: merging would make every backup file a room key.
+  The fix was routing — each password now appears in exactly one flow — not merging.)*
+- ~~Where does the broker account credential live?~~ **Decided 2026-08-08 (§13.12):
+  sealed under the room key inside the room config, typed once by the host, travelling
+  in invites and exports as ciphertext. Not in each member's Keychain — that made every
+  joiner retype a credential that is team-shared by definition.
 - ~~Should *all* payloads be encrypted, not just secret fields?~~ **Split answer, both
   decided 2026-08-07.** For *files*, the §13.9 review stands: secrets-only, readable
   catalogue, revisit on a real client's data or a security review. For the *room*, the

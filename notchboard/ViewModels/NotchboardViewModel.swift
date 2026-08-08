@@ -80,29 +80,86 @@ final class NotchboardViewModel {
         return session.isEffectivelyFree(claim) ? " · offline" : ""
     }
 
-    /// Sets up (or re-points) the active collection's room from the ▾ menu.
+    /// Sets up (or re-points) the active collection's room from the ▾ menu. The one flow
+    /// where broker details get typed — the engine seals the account password into the
+    /// config, and from then on "copy room invite" carries everything a joiner needs
+    /// except the room password.
     func setUpRoomFromMenu() {
         guard let engine = syncEngine else {
             toast("rooms aren't available in this build", color: .red)
             return
         }
-        guard let setup = RoomDialogs.promptForRoomSetup(
+        guard var setup = RoomDialogs.promptForRoomSetup(
             collectionName: workspace.name, current: activeCollection.room
         ) else { return }
+        // Re-pointing the same room with the account fields left blank keeps the sealed
+        // credential — retyping it on every settings visit would be the old three-password
+        // dance again. If the room password ALSO changed, the old seal won't open under
+        // the new key and the wrongPassword event says to re-run setup.
+        if setup.brokerPassword == nil, let current = activeCollection.room,
+           current.brokerHost == setup.config.brokerHost, current.room == setup.config.room {
+            var config = setup.config
+            config.sealedBrokerPassword = current.sealedBrokerPassword
+            setup = RoomDialogs.RoomSetup(config: config, roomPassword: setup.roomPassword, brokerPassword: nil)
+        }
         guard RoomKeyStore.saveRoomPassword(setup.roomPassword, for: setup.config) else {
             // The SecretsStore rule: a failed Keychain write is NOT stored — joining
             // anyway would work until the next relaunch, then silently stop.
             toast("couldn't store the room password in the Keychain — not joining", color: .red)
             return
         }
-        if let brokerPassword = setup.brokerPassword {
-            guard RoomKeyStore.saveBrokerPassword(brokerPassword, for: setup.config) else {
-                toast("couldn't store the broker password in the Keychain — not joining", color: .red)
-                return
-            }
+        engine.joinRoom(setup.config, password: setup.roomPassword, collectionID: activeCollectionID,
+                        brokerPassword: setup.brokerPassword)
+        toast("joining “\(setup.config.room)” — copy the invite from the ▾ menu once it's green", color: .amber)
+    }
+
+    /// Puts the one-line invite on the pasteboard. Everything a joiner needs except the
+    /// room password: address, room, and the broker credential sealed under the room key.
+    func copyRoomInvite() {
+        guard let room = activeCollection.room else { return }
+        // The seal happens asynchronously after PBKDF2, so a host who clicks fast on an
+        // auth broker could copy an invite that would fail auth — refuse it instead.
+        let urlCarriesAccount = URL(string: room.brokerURL)?.user(percentEncoded: false) != nil
+        guard !urlCarriesAccount || room.sealedBrokerPassword != nil else {
+            toast("the invite isn't sealed yet — try again in a moment", color: .amber)
+            return
         }
-        engine.joinRoom(setup.config, password: setup.roomPassword, collectionID: activeCollectionID)
-        toast("joining “\(setup.config.room)”…", color: .amber)
+        guard let invite = RoomInvite.encode(room) else {
+            toast("couldn't build the invite", color: .red)
+            return
+        }
+        clipboard.copy(invite, concealed: false)
+        toast("invite copied — share it with the room password, separately", color: .green)
+    }
+
+    /// The invitee's front door, from the ▾ menu: paste the invite, type the room
+    /// password, adopt the room's catalogue.
+    func joinWithInviteFromMenu() {
+        guard syncEngine != nil else {
+            toast("rooms aren't available in this build", color: .red)
+            return
+        }
+        guard let answer = RoomDialogs.promptToJoinWithInvite(memberName: selfClaimLabel) else { return }
+        joinRoomWithPassword(answer.config, roomPassword: answer.roomPassword, collectionID: activeCollectionID)
+    }
+
+    /// The single join gateway for every invitee-shaped path (invite paste, imported
+    /// file, onboarding): store the password, pin the config, hand off to the engine.
+    /// Returns false when the Keychain refused the write (the caller's flow must stop —
+    /// the SecretsStore rule).
+    @discardableResult
+    func joinRoomWithPassword(_ config: NBRoomConfig, roomPassword: String, collectionID: String) -> Bool {
+        guard let engine = syncEngine else { return false }
+        var incoming = config
+        incoming.firstSyncCompleted = false // a joiner has never merged, whatever travelled
+        guard RoomKeyStore.saveRoomPassword(roomPassword, for: incoming) else {
+            toast("couldn't store the room password in the Keychain — not joining", color: .red)
+            return false
+        }
+        store.setRoomConfig(incoming, collectionID: collectionID)
+        engine.joinRoom(incoming, password: roomPassword, collectionID: collectionID)
+        toast("joining “\(incoming.room)”…", color: .amber)
+        return true
     }
 
     func leaveRoomFromMenu() {
@@ -120,22 +177,12 @@ final class NotchboardViewModel {
         var incoming = room
         incoming.firstSyncCompleted = false // an importer has never merged, whatever the file says
         store.setRoomConfig(incoming, collectionID: collectionID)
-        guard let engine = syncEngine else { return }
-        guard let answer = RoomDialogs.promptToJoinImportedRoom(room: incoming, memberName: selfClaimLabel) else {
+        guard syncEngine != nil else { return }
+        guard let roomPassword = RoomDialogs.promptToJoinImportedRoom(room: incoming, memberName: selfClaimLabel) else {
             toast("staying local — join “\(incoming.room)” any time from the ▾ menu", color: .amber)
             return
         }
-        guard RoomKeyStore.saveRoomPassword(answer.roomPassword, for: incoming) else {
-            toast("couldn't store the room password in the Keychain — not joining", color: .red)
-            return
-        }
-        if let brokerPassword = answer.brokerPassword {
-            guard RoomKeyStore.saveBrokerPassword(brokerPassword, for: incoming) else {
-                toast("couldn't store the broker password in the Keychain — not joining", color: .red)
-                return
-            }
-        }
-        engine.joinRoom(incoming, password: answer.roomPassword, collectionID: collectionID)
+        joinRoomWithPassword(incoming, roomPassword: roomPassword, collectionID: collectionID)
     }
 
     /// Whether an element is *actually* blocked: a mark held by someone offline renders
@@ -153,7 +200,7 @@ final class NotchboardViewModel {
         case .connected(let onlineCount):
             toast("“\(name)” room connected · \(onlineCount) online", color: .green)
         case .wrongPassword:
-            toast("wrong room password for “\(name)” — rejoin from the collection menu", color: .red)
+            toast("wrong room password for “\(name)” — or it changed; ask for a fresh invite", color: .red)
         case .failed(let message):
             toast("“\(name)”: \(message) — changes staying local until it's back", color: .red)
         case .adoptedRoomState(let elementCount):

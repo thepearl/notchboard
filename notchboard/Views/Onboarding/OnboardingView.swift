@@ -254,15 +254,19 @@ private struct StartingPointStep: View {
             }
             .padding(.top, 14)
 
+            // Join-a-team's two inputs: the whole point of the invite redesign is that
+            // this — one paste, one password — is a teammate's entire setup.
+            if onboarding.startingPoint == .joinTeam {
+                VStack(spacing: 5) {
+                    joinField("", text: $onboarding.inviteText, prompt: "notchboard-room:…")
+                    joinSecureField("", text: $onboarding.roomPassword, prompt: "room password (shared separately)")
+                }
+                .padding(.top, 8)
+            }
+
             Spacer()
 
             HStack {
-                // Honest about the state of the world: there is no backend, so there is
-                // nothing to join. Better than a button that pretends and toasts.
-                Text("joining a team? that needs the backend — not built yet.")
-                    .font(NBFont.mono(10))
-                    .foregroundStyle(NBColor.textMuted)
-
                 Spacer()
 
                 Button {
@@ -280,6 +284,32 @@ private struct StartingPointStep: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Compact single-line field in the step's visual vocabulary (the identity step's
+    /// field, shrunk to fit two of them under the option cards).
+    private func joinField(_ label: String, text: Binding<String>, prompt: String) -> some View {
+        TextField(label, text: text, prompt: Text(prompt).foregroundStyle(NBColor.textMuted))
+            .textFieldStyle(.plain)
+            .font(NBFont.mono(11))
+            .foregroundStyle(NBColor.textPrimary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(NBColor.field)
+            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+    }
+
+    private func joinSecureField(_ label: String, text: Binding<String>, prompt: String) -> some View {
+        SecureField(label, text: text, prompt: Text(prompt).foregroundStyle(NBColor.textMuted))
+            .textFieldStyle(.plain)
+            .font(NBFont.mono(11))
+            .foregroundStyle(NBColor.textPrimary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(NBColor.field)
+            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.borderSubtle, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
     }
 }
 

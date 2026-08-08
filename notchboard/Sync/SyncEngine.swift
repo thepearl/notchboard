@@ -592,14 +592,16 @@ final class SyncEngine {
     var selfMemberID: String
     var selfName: String
     /// How a session gets its transport — the loopback broker in tests, MQTT in the app.
-    let transportFactory: (NBRoomConfig) -> SyncTransport
+    /// The second argument is the broker account's password, already unsealed (nil for
+    /// brokers without auth) — the engine owns the seal/unseal because both need the key.
+    let transportFactory: (NBRoomConfig, String?) -> SyncTransport
     /// Bubbled per-collection room events; the view model turns them into copy.
     var onEvent: ((_ collectionID: String, _ event: RoomEvent) -> Void)?
 
     private static let logger = Logger(subsystem: "flourix.notchboard", category: "sync")
 
     init(store: CollectionStore, selfMemberID: String, selfName: String,
-         transportFactory: @escaping (NBRoomConfig) -> SyncTransport) {
+         transportFactory: @escaping (NBRoomConfig, String?) -> SyncTransport) {
         self.store = store
         self.selfMemberID = selfMemberID
         self.selfName = selfName
@@ -619,7 +621,14 @@ final class SyncEngine {
     /// Joins (or rejoins) a room. Key derivation runs at full PBKDF2 cost off the main
     /// actor; `preDerivedKey` short-circuits it for tests, which need determinism more
     /// than they need the stretch.
+    ///
+    /// `brokerPassword` is the plaintext broker-account password, passed exactly once —
+    /// at the setup moment, by whoever typed it. The engine seals it under the room key
+    /// into the stored config, so every later join (relaunch, an invitee, an importer)
+    /// finds it there and unseals it instead. That asymmetry is the whole "one password
+    /// to join" design: the credential travels sealed, nobody retypes it.
     func joinRoom(_ config: NBRoomConfig, password: String, collectionID: String,
+                  brokerPassword: String? = nil,
                   rounds: Int = TransferCrypto.defaultRounds, preDerivedKey: SymmetricKey? = nil) {
         guard let host = config.brokerHost else {
             onEvent?(collectionID, .failed("\(config.brokerURL) isn't a usable broker address"))
@@ -628,7 +637,7 @@ final class SyncEngine {
         leaveRoom(collectionID: collectionID)
 
         if let preDerivedKey {
-            startSession(config, collectionID: collectionID, key: preDerivedKey)
+            startSession(config, collectionID: collectionID, key: preDerivedKey, plaintextBrokerPassword: brokerPassword)
             return
         }
         let room = config.room
@@ -642,14 +651,35 @@ final class SyncEngine {
                 self.onEvent?(collectionID, .failed("couldn't derive the room key"))
                 return
             }
-            self.startSession(config, collectionID: collectionID, key: derived)
+            self.startSession(config, collectionID: collectionID, key: derived, plaintextBrokerPassword: brokerPassword)
         }
     }
 
-    private func startSession(_ config: NBRoomConfig, collectionID: String, key: SymmetricKey) {
+    private func startSession(_ config: NBRoomConfig, collectionID: String, key: SymmetricKey,
+                              plaintextBrokerPassword: String?) {
+        var config = config
+        var brokerPassword = plaintextBrokerPassword
+        if let plaintext = plaintextBrokerPassword {
+            guard let sealed = try? RoomCrypto.seal(Data(plaintext.utf8), key: key) else {
+                onEvent?(collectionID, .failed("couldn't seal the broker password"))
+                return
+            }
+            config.sealedBrokerPassword = sealed
+        } else if let sealed = config.sealedBrokerPassword {
+            // GCM authenticates, so a failed open is certain: the typed room password
+            // doesn't match the one the credential was sealed under — wrong, or rotated
+            // since the invite was minted. Fail before any connection attempt, and never
+            // hand the broker a password we know is garbage.
+            guard let opened = try? RoomCrypto.open(sealed, key: key),
+                  let text = String(data: opened, encoding: .utf8) else {
+                onEvent?(collectionID, .wrongPassword)
+                return
+            }
+            brokerPassword = text
+        }
         let session = RoomSession(
             collectionID: collectionID, config: config,
-            transport: transportFactory(config), store: store,
+            transport: transportFactory(config, brokerPassword), store: store,
             key: key, selfMemberID: selfMemberID, selfName: selfName
         )
         session.onEvent = { [weak self] event in

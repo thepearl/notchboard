@@ -181,9 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: viewModel.store,
             selfMemberID: memberID,
             selfName: viewModel.selfName,
-            transportFactory: { config in
-                MQTTSyncTransport(config: config, memberID: memberID,
-                                  brokerPassword: RoomKeyStore.brokerPassword(for: config))
+            transportFactory: { config, brokerPassword in
+                // The broker password arrives unsealed from the engine (it lives sealed
+                // inside the config, under the room key) — never from the Keychain.
+                MQTTSyncTransport(config: config, memberID: memberID, brokerPassword: brokerPassword)
             }
         )
         // Weak on purpose: store → sink → engine → sessions → store would otherwise cycle.

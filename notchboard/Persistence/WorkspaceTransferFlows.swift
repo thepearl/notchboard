@@ -67,15 +67,13 @@ enum PromptAccessory {
         return container
     }
 
-    /// The join prompt's fields: the room password, plus the broker account password
-    /// above it when the imported address carries an account username.
-    static func roomJoin(accountPassword: NSTextField?, roomPassword: NSTextField) -> NSView {
-        guard let accountPassword else { return password(field: roomPassword) }
+    /// The invite-join prompt's fields: the pasted invite line above the room password.
+    static func inviteJoin(invite: NSTextField, password: NSTextField) -> NSView {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 54))
-        accountPassword.frame = NSRect(x: 0, y: 30, width: 338, height: 24)
-        roomPassword.frame = NSRect(x: 0, y: 0, width: 338, height: 24)
-        container.addSubview(accountPassword)
-        container.addSubview(roomPassword)
+        invite.frame = NSRect(x: 0, y: 30, width: 338, height: 24)
+        password.frame = NSRect(x: 0, y: 0, width: 338, height: 24)
+        container.addSubview(invite)
+        container.addSubview(password)
         return container
     }
 
@@ -102,12 +100,15 @@ enum WorkspaceExportFlow {
         while true {
             let alert = NSAlert()
             alert.messageText = "Set a password for “\(collectionName)”"
+            // "file password", deliberately — three unrelated secrets all being "the
+            // password" was the first team's top complaint. This one opens this file,
+            // nothing else; it is not the room password.
             alert.informativeText = complaint
-                ?? "Exports always carry their secrets, encrypted. Whoever imports this file will need the password — share it separately from the file."
+                ?? "Exports always carry their secrets, encrypted. Whoever imports this file will need this file password — share it separately from the file. (This is not the room password.)"
             alert.addButton(withTitle: "Export")
             alert.addButton(withTitle: "Cancel")
 
-            let field = PromptAccessory.makeField(NSTextField(), placeholder: "export password")
+            let field = PromptAccessory.makeField(NSTextField(), placeholder: "file password")
             let generate = NSButton(title: "Generate", target: nil, action: nil)
             let target = GeneratePassphraseTarget(field: field)
             generate.target = target

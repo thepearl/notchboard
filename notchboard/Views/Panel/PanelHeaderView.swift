@@ -122,8 +122,17 @@ struct PanelHeaderView: View {
                 viewModel.setUpRoomFromMenu()
             }
             if viewModel.activeCollection.room != nil {
+                // The invitation is one paste-able line (vision.md §14.3, revised
+                // 2026-08-08) — the file export is a backup, not the invite.
+                Button("copy room invite") {
+                    viewModel.copyRoomInvite()
+                }
                 Button("leave room…") {
                     viewModel.leaveRoomFromMenu()
+                }
+            } else {
+                Button("join with an invite…") {
+                    viewModel.joinWithInviteFromMenu()
                 }
             }
             Divider()

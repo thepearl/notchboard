@@ -55,7 +55,7 @@ struct EffectivelyFreeTests {
         let vm = NotchboardViewModel()
         vm.selfMemberID = "member-me"
         vm.store.selfMemberID = "member-me"
-        let engine = SyncEngine(store: vm.store, selfMemberID: "member-me", selfName: "ghazi") { _ in
+        let engine = SyncEngine(store: vm.store, selfMemberID: "member-me", selfName: "ghazi") { _, _ in
             broker.makeTransport()
         }
         vm.store.changeSink = { [weak engine] in engine?.handleLocalChange($0) }
@@ -67,7 +67,7 @@ struct EffectivelyFreeTests {
         let peerCollection = NBCollection(workspace: NBWorkspace(name: "peer", groupOrder: [], groups: [:], members: [:]))
         let peerStore = CollectionStore(collections: [peerCollection])
         peerStore.selfMemberID = "member-peer"
-        let peerEngine = SyncEngine(store: peerStore, selfMemberID: "member-peer", selfName: "lina") { _ in
+        let peerEngine = SyncEngine(store: peerStore, selfMemberID: "member-peer", selfName: "lina") { _, _ in
             broker.makeTransport()
         }
         peerStore.changeSink = { [weak peerEngine] in peerEngine?.handleLocalChange($0) }
@@ -136,15 +136,18 @@ struct EffectivelyFreeTests {
 @Suite("Room address in exports")
 struct RoomTransferTests {
 
-    @Test("The room travels; its firstSyncCompleted flag does not")
+    @Test("The room travels — sealed broker credential included; firstSyncCompleted does not")
     func roomRoundTrips() throws {
         var room = NBRoomConfig(brokerURL: "mqtts://broker.acme.dev:8883", room: "acme-mobile")
         room.firstSyncCompleted = true // this Mac's history, not the file's business
+        room.sealedBrokerPassword = Data([9, 8, 7]) // ciphertext is safe in a file
 
         let data = try WorkspaceTransfer.exportData(MockData.workspace(), password: "pw", room: room, rounds: 1_000)
         let file = try WorkspaceTransfer.readFile(from: data)
         #expect(file.room?.brokerURL == "mqtts://broker.acme.dev:8883")
         #expect(file.room?.room == "acme-mobile")
+        #expect(file.room?.sealedBrokerPassword == Data([9, 8, 7]),
+                "an importer must be able to join with just the room password")
         #expect(file.room?.firstSyncCompleted == false, "an importer has never merged — they must adopt, not double-push")
     }
 
@@ -158,18 +161,15 @@ struct RoomTransferTests {
 @Suite("Room key store", .serialized)
 struct RoomKeyStoreTests {
 
-    @Test("Room and broker passwords round-trip, overwrite, and delete together")
+    @Test("The room password round-trips, overwrites, and deletes")
     func roundTrip() {
         // A unique room per run so a crashed earlier run can't leak state in.
         let config = NBRoomConfig(brokerURL: "mqtts://user@test.invalid:8883", room: "kc-\(UUID().uuidString.prefix(8))")
         defer { RoomKeyStore.deletePasswords(for: config) }
 
         #expect(RoomKeyStore.roomPassword(for: config) == nil)
-        #expect(RoomKeyStore.brokerPassword(for: config) == nil)
         #expect(RoomKeyStore.saveRoomPassword("swordfish", for: config))
-        #expect(RoomKeyStore.saveBrokerPassword("hive-cred", for: config))
         #expect(RoomKeyStore.roomPassword(for: config) == "swordfish")
-        #expect(RoomKeyStore.brokerPassword(for: config) == "hive-cred")
 
         // Overwrite, not duplicate — rotation is the only revocation there is.
         #expect(RoomKeyStore.saveRoomPassword("rotated", for: config))
@@ -177,7 +177,6 @@ struct RoomKeyStoreTests {
 
         RoomKeyStore.deletePasswords(for: config)
         #expect(RoomKeyStore.roomPassword(for: config) == nil)
-        #expect(RoomKeyStore.brokerPassword(for: config) == nil, "leaving a room must clear both credentials")
     }
 
     @Test("An unparseable broker URL stores nothing rather than keying on garbage")
@@ -215,19 +214,14 @@ struct RoomAccessoryLayoutTests {
         #expect(!accountUser.frame.intersects(accountPassword.frame), "the account pair must sit side by side, not stacked")
     }
 
-    @Test("The join accessory shows the account field only when the address carries a user")
-    func joinAccessoryAdapts() {
-        let roomOnly = PromptAccessory.roomJoin(accountPassword: nil,
-                                                roomPassword: PromptAccessory.makeField(NSSecureTextField(), placeholder: "r"))
-        roomOnly.layoutSubtreeIfNeeded()
-        #expect(roomOnly.frame.height <= 30, "no account, no second row")
-
-        let account = PromptAccessory.makeField(NSSecureTextField(), placeholder: "a")
-        let roomField = PromptAccessory.makeField(NSSecureTextField(), placeholder: "r")
-        let both = PromptAccessory.roomJoin(accountPassword: account, roomPassword: roomField)
-        both.layoutSubtreeIfNeeded()
-        #expect(both.frame.height > 30)
-        #expect(!account.frame.intersects(roomField.frame))
-        #expect(account.frame.width >= 300 && roomField.frame.width >= 300)
+    @Test("The invite-join accessory keeps both fields wide and apart")
+    func inviteJoinSurvivesLayout() {
+        let invite = PromptAccessory.makeField(NSTextField(), placeholder: "i")
+        let password = PromptAccessory.makeField(NSSecureTextField(), placeholder: "p")
+        let container = PromptAccessory.inviteJoin(invite: invite, password: password)
+        container.layoutSubtreeIfNeeded()
+        #expect(!invite.frame.intersects(password.frame))
+        #expect(invite.frame.width >= 300 && password.frame.width >= 300,
+                "an invite line a paste can't fit in is the export-password bug again")
     }
 }

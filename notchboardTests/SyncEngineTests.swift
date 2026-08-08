@@ -69,7 +69,7 @@ private final class Peer {
         store = CollectionStore(collections: [collection])
         store.selfMemberID = memberID
         let box = transportBox
-        engine = SyncEngine(store: store, selfMemberID: memberID, selfName: name) { _ in
+        engine = SyncEngine(store: store, selfMemberID: memberID, selfName: name) { _, _ in
             let transport = broker.makeTransport()
             box.all.append(transport)
             return transport

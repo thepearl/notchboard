@@ -166,8 +166,8 @@ struct NotchboardSceneView: View {
                 guard let imported = try WorkspaceImportFlow.importInteractively(from: url) else { return false }
                 viewModel.replaceActiveCollection(with: imported.workspace)
                 if let room = imported.room {
-                    // Persona 2's onboarding path (§14.3): imported the team's file,
-                    // offered the room right there.
+                    // The file path still offers its room (§14.3's backup route) —
+                    // but the front door for teammates is .joinTeam below.
                     viewModel.offerToJoinImportedRoom(room, collectionID: viewModel.activeCollectionID)
                 }
                 return true
@@ -175,6 +175,22 @@ struct NotchboardSceneView: View {
                 viewModel.toast(WorkspaceImportFlow.userMessage(for: error), color: .red)
                 return false
             }
+        case .joinTeam:
+            // A teammate's entire setup (§14.3, revised 2026-08-08): paste the invite,
+            // type the room password. Start empty so the first connect adopts the room's
+            // catalogue rather than seeding sample data into the team's room.
+            guard let config = RoomInvite.decode(onboarding.inviteText) else {
+                viewModel.toast("that doesn't decode as a notchboard invite — paste the whole “notchboard-room:…” line", color: .red)
+                return false
+            }
+            let password = onboarding.roomPassword.trimmingCharacters(in: .whitespaces)
+            guard !password.isEmpty else {
+                viewModel.toast("the room password is the one secret the invite doesn't carry — ask whoever sent it", color: .red)
+                return false
+            }
+            viewModel.adoptSeedWorkspace(MockData.emptyWorkspace())
+            return viewModel.joinRoomWithPassword(config, roomPassword: password,
+                                                  collectionID: viewModel.activeCollectionID)
         }
     }
 
@@ -194,6 +210,8 @@ struct NotchboardSceneView: View {
             viewModel.toast("“\(viewModel.workspace.name)” ready — \(viewModel.hotKeyModifier.symbolPrefix)N to add your first element", color: .green)
         case .importFile:
             break // replaceWorkspace already toasted what it imported
+        case .joinTeam:
+            break // joinRoomWithPassword toasted "joining…", and adopt will toast the count
         }
     }
 }

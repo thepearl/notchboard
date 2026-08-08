@@ -22,13 +22,16 @@ enum RoomDialogs {
         let config: NBRoomConfig
         let roomPassword: String
         /// The broker account's password (HiveMQ Cloud and friends); nil for brokers
-        /// without auth. Its username lives inside `config.brokerURL`.
+        /// without auth. Its username lives inside `config.brokerURL`. Plaintext exactly
+        /// here and in the engine's hand-off to the transport — the engine seals it into
+        /// the config, and from then on it travels only as ciphertext.
         let brokerPassword: String?
     }
 
-    /// Sets up (or re-points) a collection's room: broker address, room name, the broker
-    /// account pair when the broker requires one, and the room password. Loops until
-    /// usable or cancelled. Storing and joining are the caller's job.
+    /// Sets up (or re-points) a collection's room. This is the ONE dialog where broker
+    /// details get typed, by one person, once — everyone else joins from the invite,
+    /// which carries all of it (the account password sealed under the room key).
+    /// Loops until usable or cancelled. Storing and joining are the caller's job.
     static func promptForRoomSetup(collectionName: String, current: NBRoomConfig?) -> RoomSetup? {
         var complaint: String?
         var brokerText = current?.brokerURL ?? ""
@@ -42,12 +45,12 @@ enum RoomDialogs {
             // first real user typed the example in verbatim and got a red dot and a
             // ten-second timeout. The address has to come from an actual broker.
             alert.informativeText = complaint ?? """
-            Everyone who joins this room shares the catalogue live. Enter the address of a \
-            real MQTT broker your team can reach (mqtts:// for TLS, wss:// through \
-            corporate firewalls). Managed brokers like HiveMQ Cloud need the account \
-            credentials they gave you — leave those two fields empty for brokers without \
-            auth. Address, room name and account username travel inside exports; the two \
-            passwords are shared out of band, like wifi.
+            Only the person setting the room up sees this dialog — teammates just paste \
+            the invite you'll get afterwards, and type the room password. Enter the \
+            address of a real MQTT broker your team can reach (mqtts:// for TLS, wss:// \
+            through corporate firewalls), and the account credentials for managed \
+            brokers like HiveMQ Cloud — empty for brokers without auth. The room \
+            password seals everything; share it out of band, like wifi.
             """
             alert.addButton(withTitle: "Join Room")
             alert.addButton(withTitle: "Cancel")
@@ -58,7 +61,14 @@ enum RoomDialogs {
             room.stringValue = roomText
             let accountUser = PromptAccessory.makeField(NSTextField(), placeholder: "broker username (if any)")
             accountUser.stringValue = userText
-            let accountPassword = PromptAccessory.makeField(NSSecureTextField(), placeholder: "broker password (if any)")
+            let accountPassword = PromptAccessory.makeField(
+                NSSecureTextField(),
+                // Re-pointing an existing auth room keeps the sealed credential when
+                // this stays blank (the view model carries it forward) — say so.
+                placeholder: current?.sealedBrokerPassword != nil
+                    ? "broker password (blank = keep current)"
+                    : "broker password (if any)"
+            )
             let password = PromptAccessory.makeField(NSTextField(), placeholder: "room password")
             let generate = NSButton(title: "Generate", target: nil, action: nil)
             let target = GeneratePassphraseTarget(field: password)
@@ -117,36 +127,69 @@ enum RoomDialogs {
         }
     }
 
-    /// The §14.3 moment: an imported file carried a room address. Returns the typed
-    /// passwords, nil to stay local (the collection still imports either way). The
-    /// broker-account field only appears when the address actually carries a username.
-    static func promptToJoinImportedRoom(room: NBRoomConfig, memberName: String) -> (roomPassword: String, brokerPassword: String?)? {
-        let accountUser = URL(string: room.brokerURL)?.user(percentEncoded: false)
-
+    /// The §14.3 moment: an imported file carried a room address. Returns the typed room
+    /// password — the only secret a joiner ever needs (the broker credential rides sealed
+    /// inside the config) — or nil to stay local (the collection imports either way).
+    static func promptToJoinImportedRoom(room: NBRoomConfig, memberName: String) -> String? {
         let alert = NSAlert()
         alert.messageText = "Join the “\(room.room)” room as \(memberName.isEmpty ? "yourself" : memberName)?"
         alert.informativeText = """
         This collection syncs through \(room.brokerHost ?? room.brokerURL). Enter the room \
-        password — whoever shared the file has it\(accountUser.map { " — and the broker password for “\($0)”" } ?? "") \
-        — and edits and in-use marks flow both ways, live. Skip to keep the catalogue \
-        local; you can join later from the ▾ menu.
+        password — whoever shared the file has it — and edits and in-use marks flow both \
+        ways, live. Skip to keep the catalogue local; you can join later from the ▾ menu.
         """
         alert.addButton(withTitle: "Join")
         alert.addButton(withTitle: "Not Now")
 
         let roomPassword = PromptAccessory.makeField(NSSecureTextField(), placeholder: "room password")
-        let accountPassword = accountUser.map { _ in
-            PromptAccessory.makeField(NSSecureTextField(), placeholder: "broker password (account “\(accountUser ?? "")”)")
-        }
-        alert.accessoryView = PromptAccessory.roomJoin(accountPassword: accountPassword, roomPassword: roomPassword)
-        alert.window.initialFirstResponder = accountPassword ?? roomPassword
+        alert.accessoryView = PromptAccessory.password(field: roomPassword)
+        alert.window.initialFirstResponder = roomPassword
 
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let password = roomPassword.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !password.isEmpty else { return nil }
-        let broker = accountPassword?.stringValue.trimmingCharacters(in: .whitespaces) ?? ""
-        return (password, broker.isEmpty ? nil : broker)
+        return password.isEmpty ? nil : password
+    }
+
+    /// The front door for invitees: paste the one-line invite a teammate sent, type the
+    /// room password, done. Loops on a bad paste rather than dumping the user back to
+    /// the menu. Returns nil on cancel.
+    static func promptToJoinWithInvite(memberName: String) -> (config: NBRoomConfig, roomPassword: String)? {
+        var complaint: String?
+        var inviteText = ""
+
+        while true {
+            let alert = NSAlert()
+            alert.messageText = "Join a team room\(memberName.isEmpty ? "" : " as \(memberName)")"
+            alert.informativeText = complaint ?? """
+            Paste the invite a teammate copied from their ▾ menu (it starts with \
+            “notchboard-room:”), and the room password they shared separately. The room's \
+            catalogue replaces this collection's — your local copy is snapshotted first.
+            """
+            alert.addButton(withTitle: "Join")
+            alert.addButton(withTitle: "Cancel")
+
+            let invite = PromptAccessory.makeField(NSTextField(), placeholder: "notchboard-room:…")
+            invite.stringValue = inviteText
+            let roomPassword = PromptAccessory.makeField(NSSecureTextField(), placeholder: "room password")
+            alert.accessoryView = PromptAccessory.inviteJoin(invite: invite, password: roomPassword)
+            alert.window.initialFirstResponder = inviteText.isEmpty ? invite : roomPassword
+
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
+            inviteText = invite.stringValue
+            guard let config = RoomInvite.decode(inviteText) else {
+                complaint = "That doesn't decode as a notchboard invite — paste the whole “notchboard-room:…” line."
+                continue
+            }
+            let password = roomPassword.stringValue.trimmingCharacters(in: .whitespaces)
+            guard !password.isEmpty else {
+                complaint = "The room password is the one secret the invite doesn't carry — ask whoever sent it."
+                continue
+            }
+            return (config, password)
+        }
     }
 
     static func confirmLeave(roomName: String, collectionName: String) -> Bool {
