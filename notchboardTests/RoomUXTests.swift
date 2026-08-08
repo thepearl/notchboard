@@ -158,15 +158,18 @@ struct RoomTransferTests {
 @Suite("Room key store", .serialized)
 struct RoomKeyStoreTests {
 
-    @Test("The room password round-trips, overwrites, and deletes")
+    @Test("Room and broker passwords round-trip, overwrite, and delete together")
     func roundTrip() {
         // A unique room per run so a crashed earlier run can't leak state in.
-        let config = NBRoomConfig(brokerURL: "mqtts://test.invalid:8883", room: "kc-\(UUID().uuidString.prefix(8))")
+        let config = NBRoomConfig(brokerURL: "mqtts://user@test.invalid:8883", room: "kc-\(UUID().uuidString.prefix(8))")
         defer { RoomKeyStore.deletePasswords(for: config) }
 
         #expect(RoomKeyStore.roomPassword(for: config) == nil)
+        #expect(RoomKeyStore.brokerPassword(for: config) == nil)
         #expect(RoomKeyStore.saveRoomPassword("swordfish", for: config))
+        #expect(RoomKeyStore.saveBrokerPassword("hive-cred", for: config))
         #expect(RoomKeyStore.roomPassword(for: config) == "swordfish")
+        #expect(RoomKeyStore.brokerPassword(for: config) == "hive-cred")
 
         // Overwrite, not duplicate — rotation is the only revocation there is.
         #expect(RoomKeyStore.saveRoomPassword("rotated", for: config))
@@ -174,6 +177,7 @@ struct RoomKeyStoreTests {
 
         RoomKeyStore.deletePasswords(for: config)
         #expect(RoomKeyStore.roomPassword(for: config) == nil)
+        #expect(RoomKeyStore.brokerPassword(for: config) == nil, "leaving a room must clear both credentials")
     }
 
     @Test("An unparseable broker URL stores nothing rather than keying on garbage")
@@ -187,20 +191,43 @@ struct RoomKeyStoreTests {
 @Suite("Room dialog accessory layout")
 struct RoomAccessoryLayoutTests {
 
-    @Test("The room-setup triplet keeps every field wide enough to read")
+    @Test("The room-setup form keeps every field wide enough to read")
     func roomSetupSurvivesLayout() {
         let broker = PromptAccessory.makeField(NSTextField(), placeholder: "broker")
         let room = PromptAccessory.makeField(NSTextField(), placeholder: "room")
+        let accountUser = PromptAccessory.makeField(NSTextField(), placeholder: "user")
+        let accountPassword = PromptAccessory.makeField(NSSecureTextField(), placeholder: "pass")
         let password = PromptAccessory.makeField(NSTextField(), placeholder: "password")
         let generate = NSButton(title: "Generate", target: nil, action: nil)
 
-        let container = PromptAccessory.roomSetup(broker: broker, room: room, password: password, generate: generate)
+        let container = PromptAccessory.roomSetup(
+            broker: broker, room: room,
+            accountUser: accountUser, accountPassword: accountPassword,
+            password: password, generate: generate
+        )
         container.layoutSubtreeIfNeeded() // the force that exposed the NSStackView collapse
 
-        for (field, minimum) in [(broker, 300.0), (room, 300.0), (password, 200.0)] {
+        for (field, minimum) in [(broker, 300.0), (room, 300.0), (accountUser, 120.0), (accountPassword, 120.0), (password, 200.0)] {
             #expect(field.frame.width >= minimum, "a field a passphrase can't fit in is the export-password bug again")
         }
         #expect(generate.frame.width >= 80)
         #expect(!password.frame.intersects(generate.frame), "the password field must not sit under the button")
+        #expect(!accountUser.frame.intersects(accountPassword.frame), "the account pair must sit side by side, not stacked")
+    }
+
+    @Test("The join accessory shows the account field only when the address carries a user")
+    func joinAccessoryAdapts() {
+        let roomOnly = PromptAccessory.roomJoin(accountPassword: nil,
+                                                roomPassword: PromptAccessory.makeField(NSSecureTextField(), placeholder: "r"))
+        roomOnly.layoutSubtreeIfNeeded()
+        #expect(roomOnly.frame.height <= 30, "no account, no second row")
+
+        let account = PromptAccessory.makeField(NSSecureTextField(), placeholder: "a")
+        let roomField = PromptAccessory.makeField(NSSecureTextField(), placeholder: "r")
+        let both = PromptAccessory.roomJoin(accountPassword: account, roomPassword: roomField)
+        both.layoutSubtreeIfNeeded()
+        #expect(both.frame.height > 30)
+        #expect(!account.frame.intersects(roomField.frame))
+        #expect(account.frame.width >= 300 && roomField.frame.width >= 300)
     }
 }

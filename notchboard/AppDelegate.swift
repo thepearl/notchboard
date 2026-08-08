@@ -182,7 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selfMemberID: memberID,
             selfName: viewModel.selfName,
             transportFactory: { config in
-                MQTTSyncTransport(config: config, memberID: memberID)
+                MQTTSyncTransport(config: config, memberID: memberID,
+                                  brokerPassword: RoomKeyStore.brokerPassword(for: config))
             }
         )
         // Weak on purpose: store → sink → engine → sessions → store would otherwise cycle.

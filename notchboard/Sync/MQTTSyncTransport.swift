@@ -52,6 +52,10 @@ final class MQTTSyncTransport: SyncTransport {
     /// Stable per-member client id ("nb-<memberID>"): a second connect from the same Mac
     /// supersedes the old broker session instead of ghosting beside it.
     private let clientIdentifier: String
+    /// The broker account's password (persona 2's shared credential — HiveMQ Cloud and
+    /// friends). NOT the room password, which never reaches the transport at all; it only
+    /// ever derives the payload key. The matching username rides in the broker URL.
+    private let brokerPassword: String?
 
     private var client: MQTTClient?
     private var wantsConnection = false
@@ -69,8 +73,9 @@ final class MQTTSyncTransport: SyncTransport {
     private static let keepAlive: Int64 = 45
     private static let maxReconnectDelay: TimeInterval = 60
 
-    init(config: NBRoomConfig, memberID: String) {
+    init(config: NBRoomConfig, memberID: String, brokerPassword: String? = nil) {
         self.clientIdentifier = "nb-\(memberID)"
+        self.brokerPassword = brokerPassword
         switch Self.parse(config.brokerURL) {
         case .usable(let endpoint):
             self.endpoint = endpoint
@@ -169,12 +174,11 @@ final class MQTTSyncTransport: SyncTransport {
     private func attemptConnect(_ endpoint: Endpoint) {
         onStateChange?(.connecting)
 
-        // No broker password: brokers with their own auth aren't joinable until the room
-        // dialog grows a credential field (documented in the QA plan's limitations).
         let configuration = MQTTClient.Configuration(
             version: .v5_0,
             keepAliveInterval: .seconds(Self.keepAlive),
             userName: endpoint.username,
+            password: brokerPassword,
             useSSL: endpoint.useSSL,
             useWebSockets: endpoint.useWebSocket,
             webSocketURLPath: endpoint.webSocketPath

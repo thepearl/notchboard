@@ -86,17 +86,23 @@ final class NotchboardViewModel {
             toast("rooms aren't available in this build", color: .red)
             return
         }
-        guard let (config, password) = RoomDialogs.promptForRoomSetup(
+        guard let setup = RoomDialogs.promptForRoomSetup(
             collectionName: workspace.name, current: activeCollection.room
         ) else { return }
-        guard RoomKeyStore.saveRoomPassword(password, for: config) else {
+        guard RoomKeyStore.saveRoomPassword(setup.roomPassword, for: setup.config) else {
             // The SecretsStore rule: a failed Keychain write is NOT stored — joining
             // anyway would work until the next relaunch, then silently stop.
             toast("couldn't store the room password in the Keychain — not joining", color: .red)
             return
         }
-        engine.joinRoom(config, password: password, collectionID: activeCollectionID)
-        toast("joining “\(config.room)”…", color: .amber)
+        if let brokerPassword = setup.brokerPassword {
+            guard RoomKeyStore.saveBrokerPassword(brokerPassword, for: setup.config) else {
+                toast("couldn't store the broker password in the Keychain — not joining", color: .red)
+                return
+            }
+        }
+        engine.joinRoom(setup.config, password: setup.roomPassword, collectionID: activeCollectionID)
+        toast("joining “\(setup.config.room)”…", color: .amber)
     }
 
     func leaveRoomFromMenu() {
@@ -115,15 +121,21 @@ final class NotchboardViewModel {
         incoming.firstSyncCompleted = false // an importer has never merged, whatever the file says
         store.setRoomConfig(incoming, collectionID: collectionID)
         guard let engine = syncEngine else { return }
-        guard let password = RoomDialogs.promptToJoinImportedRoom(room: incoming, memberName: selfClaimLabel) else {
+        guard let answer = RoomDialogs.promptToJoinImportedRoom(room: incoming, memberName: selfClaimLabel) else {
             toast("staying local — join “\(incoming.room)” any time from the ▾ menu", color: .amber)
             return
         }
-        guard RoomKeyStore.saveRoomPassword(password, for: incoming) else {
+        guard RoomKeyStore.saveRoomPassword(answer.roomPassword, for: incoming) else {
             toast("couldn't store the room password in the Keychain — not joining", color: .red)
             return
         }
-        engine.joinRoom(incoming, password: password, collectionID: collectionID)
+        if let brokerPassword = answer.brokerPassword {
+            guard RoomKeyStore.saveBrokerPassword(brokerPassword, for: incoming) else {
+                toast("couldn't store the broker password in the Keychain — not joining", color: .red)
+                return
+            }
+        }
+        engine.joinRoom(incoming, password: answer.roomPassword, collectionID: collectionID)
     }
 
     /// Whether an element is *actually* blocked: a mark held by someone offline renders

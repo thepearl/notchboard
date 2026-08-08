@@ -44,9 +44,11 @@ example `sqli-mob-x7k2q`. The host generates the room password with the Generate
 and shares it over a separate channel (Slack DM is fine — never in the same message as
 the exported file).
 
-Known limitation, on purpose this round: brokers that require their own username and
-password (HiveMQ Cloud's free tier, a hardened company mosquitto) aren't joinable from
-the UI yet — the dialog has no broker-credential field. That's the next increment.
+Brokers with their own account (HiveMQ Cloud, a hardened company mosquitto) work too:
+put the account username and password in the two broker fields of the room dialog. For
+HiveMQ Cloud, create the credentials under Access Management first and use the TLS MQTT
+URL as `mqtts://<broker-id>.s1.eu.hivemq.cloud:8883`. The username travels inside
+exports with the address; both passwords are shared out of band.
 
 ---
 
@@ -204,7 +206,6 @@ offline at quit and come back at relaunch.
 
 ## Known and accepted for this round — don't file these
 
-- Brokers requiring their own username/password can't be joined from the UI yet.
 - If you release an element while offline, reconnecting brings your own old mark back
   for a while — it ages out via auto-release. A status light, not a document.
 - Removing someone from the room means changing the room password and re-sharing it.

@@ -48,18 +48,34 @@ enum PromptAccessory {
         return container
     }
 
-    /// The room-setup triplet: broker address, room name, password + Generate. Same fixed
-    /// frames, stacked by hand, rows 30pt apart top-down.
-    static func roomSetup(broker: NSTextField, room: NSTextField, password: NSTextField, generate: NSButton) -> NSView {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 90))
-        broker.frame = NSRect(x: 0, y: 63, width: 338, height: 24)
-        room.frame = NSRect(x: 0, y: 33, width: 338, height: 24)
+    /// The room-setup form: broker address, room name, the broker account pair (side by
+    /// side — empty for brokers without auth), and the room password + Generate. Same
+    /// fixed frames, stacked by hand, rows 30pt apart top-down.
+    static func roomSetup(broker: NSTextField, room: NSTextField,
+                          accountUser: NSTextField, accountPassword: NSTextField,
+                          password: NSTextField, generate: NSButton) -> NSView {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 120))
+        broker.frame = NSRect(x: 0, y: 93, width: 338, height: 24)
+        room.frame = NSRect(x: 0, y: 63, width: 338, height: 24)
+        accountUser.frame = NSRect(x: 0, y: 33, width: 165, height: 24)
+        accountPassword.frame = NSRect(x: 173, y: 33, width: 165, height: 24)
         password.frame = NSRect(x: 0, y: 3, width: 232, height: 24)
         generate.frame = NSRect(x: 240, y: 0, width: 98, height: 30)
-        container.addSubview(broker)
-        container.addSubview(room)
-        container.addSubview(password)
-        container.addSubview(generate)
+        for field in [broker, room, accountUser, accountPassword, password, generate] {
+            container.addSubview(field)
+        }
+        return container
+    }
+
+    /// The join prompt's fields: the room password, plus the broker account password
+    /// above it when the imported address carries an account username.
+    static func roomJoin(accountPassword: NSTextField?, roomPassword: NSTextField) -> NSView {
+        guard let accountPassword else { return password(field: roomPassword) }
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 338, height: 54))
+        accountPassword.frame = NSRect(x: 0, y: 30, width: 338, height: 24)
+        roomPassword.frame = NSRect(x: 0, y: 0, width: 338, height: 24)
+        container.addSubview(accountPassword)
+        container.addSubview(roomPassword)
         return container
     }
 

@@ -40,16 +40,30 @@ enum RoomKeyStore {
         return load(account: account)
     }
 
-    // No broker-credential storage yet, on purpose: the room dialog has no field for a
-    // broker's own username/password, so plumbing for it would be dead code (the same
-    // rule that bans compat shims). When brokers with auth become joinable, the field,
-    // a "broker" account kind here, and the transport's password hookup land together.
+    // MARK: - Broker account credential
+    //
+    // Persona 2's shared broker account (§14.3 — HiveMQ Cloud, a hardened mosquitto).
+    // The username travels inside the broker URL (it's shared, like the address); this
+    // password never travels, exactly like the room password.
+
+    @discardableResult
+    static func saveBrokerPassword(_ password: String, for config: NBRoomConfig) -> Bool {
+        guard let account = account(for: config, kind: "broker") else { return false }
+        return save(password, account: account)
+    }
+
+    static func brokerPassword(for config: NBRoomConfig) -> String? {
+        guard let account = account(for: config, kind: "broker") else { return nil }
+        return load(account: account)
+    }
 
     /// Leave-room and collection-delete both come through here: a password for a room
     /// this Mac no longer belongs to is pure liability.
     static func deletePasswords(for config: NBRoomConfig) {
-        guard let account = account(for: config, kind: "room") else { return }
-        SecItemDelete(baseQuery(account: account) as CFDictionary)
+        for kind in ["room", "broker"] {
+            guard let account = account(for: config, kind: kind) else { continue }
+            SecItemDelete(baseQuery(account: account) as CFDictionary)
+        }
     }
 
     // MARK: - Plumbing
