@@ -795,8 +795,10 @@ The last polish of the session was follow latency: the panel trailed a dragged S
 window by up to half a second (a 0.35s AX poll stacked on a 0.15s reposition tick). The
 tracker now polls adaptively — ~60Hz exactly while a drag is possible (Simulator
 frontmost, mouse button down), 10Hz while it's merely frontmost, the old ~3Hz otherwise —
-and fires a callback that repositions the panel the moment a frame lands. Docked
-movement now reads as part of the Simulator window rather than something chasing it.
+and fires a callback that repositions the panel the moment a frame lands. On top of
+that, each sample is a short ease-out glide rather than a snap — retargeting mid-glide
+interpolates the discrete AX samples into one continuous motion. Docked movement now
+reads as part of the Simulator window rather than something chasing it.
 
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 

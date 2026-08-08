@@ -717,7 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
+            context.duration = 0.12
             panel.animator().alphaValue = 1
         }
     }
@@ -742,17 +742,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
     }
 
-    /// Applies a new frame to the panel. Position-only updates while following Simulator
-    /// (e.g. the user dragging its window) snap instantly for 1:1 tracking; genuine content
-    /// mode changes (collapse ↔ expand, coach mark appearing, etc.) animate smoothly. The
-    /// very first placement after launch or a hide snaps without animating — there is no
-    /// previous frame worth animating from.
+    /// How long a follow glide lasts. The tracker delivers discrete position samples
+    /// (~30ms apart during a drag); gliding to each one and retargeting mid-glide
+    /// interpolates them into continuous motion — snapping to each sample read as
+    /// stepping. Short enough that the panel trails the window by less than a fingertip.
+    private static let followAnimationDuration: TimeInterval = 0.12
+
+    /// Applies a new frame to the panel. Position updates while following Simulator
+    /// (the user dragging its window) glide with a short ease-out so discrete tracker
+    /// samples read as one motion; genuine content mode changes (collapse ↔ expand,
+    /// coach mark appearing, etc.) animate at their own pace. The very first placement
+    /// after launch or a hide snaps without animating — there is no previous frame worth
+    /// animating from.
     private func apply(_ frame: NSRect, to panel: NSPanel, mode: PanelContentMode) {
         let isModeTransition = lastContentMode != nil && lastContentMode != mode
         // Compare against the last *target*, never the live frame: mid-animation the live
         // frame is intermediate, and treating it as drift snapped every transition
         // animation dead ~150ms in.
         guard isModeTransition || frame != lastTargetFrame else { return }
+        let isFirstPlacement = lastTargetFrame == nil
         lastContentMode = mode
         lastTargetFrame = frame
 
@@ -762,8 +770,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 panel.animator().setFrame(frame, display: true)
             }
-        } else {
+        } else if isFirstPlacement || !panel.isVisible {
             panel.setFrame(frame, display: true)
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.followAnimationDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(frame, display: true)
+            }
         }
     }
 }
