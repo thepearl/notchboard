@@ -31,13 +31,12 @@ struct HotKeyModifierTests {
         #expect(NBHotKeyModifier.optionCommand.appKitFlags == [.option, .command])
     }
 
-    @Test("Every modifier carries a distinct symbol prefix and a cost note")
+    @Test("Every modifier carries a distinct symbol prefix and a label")
     func uiCopyIsComplete() {
         let prefixes = NBHotKeyModifier.allCases.map(\.symbolPrefix)
         #expect(Set(prefixes).count == NBHotKeyModifier.allCases.count)
         for modifier in NBHotKeyModifier.allCases {
             #expect(!modifier.label.isEmpty)
-            #expect(!modifier.costNote.isEmpty)
         }
     }
 

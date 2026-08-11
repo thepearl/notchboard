@@ -46,12 +46,15 @@ struct SearchFieldView: View {
                     .font(NBFont.ui(14, weight: .semibold))
                     .foregroundStyle(NBColor.background)
                     .padding(.horizontal, 10)
-                    .frame(height: 29)
+                    // The height belongs on the label, not the Button: an outer frame gave
+                    // a 29pt pill floating in a 34pt slot, so the visible control and its
+                    // hit area disagreed — the exact trap documented in ElementRowView.
+                    .frame(height: NBMetrics.controlHeight)
                     .background(NBColor.amber)
                     .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.nbPlain)
-            .frame(height: NBMetrics.controlHeight)
             .fixedSize(horizontal: true, vertical: false)
             .help("add a new \(viewModel.activeGroup.singular) entry (\(viewModel.hotKeyModifier.symbolPrefix)N)")
         }

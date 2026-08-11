@@ -11,7 +11,6 @@ enum NBMetrics {
     static let panelHeight: CGFloat = 592
     static let panelCornerRadius: CGFloat = 10
     static let rowCornerRadius: CGFloat = 3
-    static let chipCornerRadius: CGFloat = 3
     static let cardCornerRadius: CGFloat = 6
 
     // 28×150 → 36×62 after several rounds of team feedback: wider (a 28pt tab was a

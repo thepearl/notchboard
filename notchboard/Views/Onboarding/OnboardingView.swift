@@ -388,19 +388,6 @@ private struct StartingPointCard: View {
     }
 }
 
-private struct AvatarBubble: View {
-    let initials: String
-    let color: Color
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 20, height: 20)
-            .overlay(Circle().stroke(NBColor.panel, lineWidth: 2))
-            .overlay(Text(initials).font(NBFont.ui(8, weight: .bold)).foregroundStyle(.white))
-    }
-}
-
 private struct PermissionStep: View {
     @Bindable var onboarding: OnboardingViewModel
     let onNext: () -> Void

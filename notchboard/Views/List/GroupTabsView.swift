@@ -28,10 +28,12 @@ struct GroupTabsView: View {
             Spacer(minLength: 8)
 
             if !viewModel.activeGroup.id.isEmpty {
+                // No .foregroundStyle on the Text: the innermost style wins in SwiftUI, so
+                // setting it here made nbHoverColor's outer style a no-op and neither of
+                // these two buttons ever showed its amber hover state.
                 Button(action: viewModel.openEditGroup) {
                     Text("✎")
                         .font(NBFont.ui(12))
-                        .foregroundStyle(NBColor.textSecondary)
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.nbPlain)
@@ -42,7 +44,6 @@ struct GroupTabsView: View {
             Button(action: viewModel.openNewGroup) {
                 Text("＋ new group")
                     .font(NBFont.ui(14))
-                    .foregroundStyle(NBColor.textSecondary)
             }
             .buttonStyle(.nbPlain)
             .nbHoverColor(NBColor.amber, base: NBColor.textSecondary)

@@ -16,12 +16,12 @@ struct DeeplinkSchemeTests {
 
     @Test("Accepts plausible custom schemes", arguments: ["myapp", "brewly", "my-app.x+y", "a1"])
     func acceptsCustomSchemes(scheme: String) {
-        #expect(NotchboardViewModel.isValidDeeplinkScheme(scheme))
+        #expect(NBDeeplinkScheme.isValid(scheme))
     }
 
     @Test("Rejects network schemes and malformed values", arguments: ["https", "HTTP", "ftp", "file", "1app", "my app", "", "app:colon"])
     func rejectsBadSchemes(scheme: String) {
-        #expect(!NotchboardViewModel.isValidDeeplinkScheme(scheme))
+        #expect(!NBDeeplinkScheme.isValid(scheme))
     }
 
     @Test("A pasted universal link never fires the deeplink")

@@ -52,10 +52,4 @@ final class ToastCenter {
             self?.items.removeAll { $0.id == item.id }
         }
     }
-
-    /// Drops everything immediately — used when the catalogue under the panel is replaced
-    /// wholesale and the old messages no longer describe anything on screen.
-    func clear() {
-        items.removeAll()
-    }
 }

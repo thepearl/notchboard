@@ -89,18 +89,6 @@ enum NBHotKeyModifier: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// What claiming this chord takes away from the rest of the system, shown in Settings so
-    /// the choice is informed rather than a surprise.
-    var costNote: String {
-        switch self {
-        case .control:
-            return "⌃K and ⌃N are standard text-editing and shell bindings (kill-line, move-down). Notchboard only takes them over while Xcode or Simulator is frontmost, so they keep working in Terminal and everywhere else."
-        case .command:
-            return "⌘N is New File in Xcode and ⌘K is Clear Console. Notchboard only takes them over while Xcode or Simulator is frontmost, so ⌘N still makes a new file in Xcode… which is probably not what you want. Prefer ⌃ or ⌥⌘."
-        case .optionCommand:
-            return "Collides with almost nothing, and is what comparable menu-bar utilities ship. The safest choice."
-        }
-    }
 }
 
 /// Which side of the Simulator window Notchboard docks to.
@@ -231,7 +219,17 @@ struct NBElement: Identifiable, Codable, Equatable {
     /// warning about, since a prod credential reachable from a dev build is how prod data
     /// ends up in a staging log.
     var mixesProductionWithOthers: Bool {
-        environments.contains(.prd) && environments.count > 1
+        environments.mixesProductionWithOthers
+    }
+}
+
+extension Set where Element == NBEnvironment {
+    /// The production-mixing rule itself, on the set rather than the element, because the
+    /// two places that ask are an existing element and a half-typed form draft. It lived in
+    /// both, spelled out by hand in the view model and as a property here — one of the two
+    /// copies would eventually have been edited alone.
+    var mixesProductionWithOthers: Bool {
+        contains(.prd) && count > 1
     }
 }
 

@@ -96,8 +96,14 @@ final class NotchboardViewModel {
         // credential — retyping it on every settings visit would be the old three-password
         // dance again. If the room password ALSO changed, the old seal won't open under
         // the new key and the wrongPassword event says to re-run setup.
+        //
+        // The username has to match too, not just host and room: carrying an old account's
+        // sealed password forward under a newly typed username pairs two halves of two
+        // different credentials, and every connection then fails auth for no visible reason.
         if setup.brokerPassword == nil, let current = activeCollection.room,
-           current.brokerHost == setup.config.brokerHost, current.room == setup.config.room {
+           current.brokerHost == setup.config.brokerHost, current.room == setup.config.room,
+           URL(string: current.brokerURL)?.user(percentEncoded: false)
+               == URL(string: setup.config.brokerURL)?.user(percentEncoded: false) {
             var config = setup.config
             config.sealedBrokerPassword = current.sealedBrokerPassword
             setup = RoomDialogs.RoomSetup(config: config, roomPassword: setup.roomPassword, brokerPassword: nil)
@@ -116,14 +122,13 @@ final class NotchboardViewModel {
     /// Puts the one-line invite on the pasteboard. Everything a joiner needs except the
     /// room password: address, room, and the broker credential sealed under the room key.
     func copyRoomInvite() {
+        // No "is it sealed yet?" guard here. A username with no password is a legitimate
+        // broker setup, and gating on the URL carrying a username refused those invites
+        // forever while telling the user to try again shortly. The race it was aimed at
+        // barely exists either: the collection only gains a room config in `startSession`,
+        // which is the same place the seal is written, so a config that exists is a config
+        // whose seal is already whatever it will be.
         guard let room = activeCollection.room else { return }
-        // The seal happens asynchronously after PBKDF2, so a host who clicks fast on an
-        // auth broker could copy an invite that would fail auth — refuse it instead.
-        let urlCarriesAccount = URL(string: room.brokerURL)?.user(percentEncoded: false) != nil
-        guard !urlCarriesAccount || room.sealedBrokerPassword != nil else {
-            toast("the invite isn't sealed yet — try again in a moment", color: .amber)
-            return
-        }
         guard let invite = RoomInvite.encode(room) else {
             toast("couldn't build the invite", color: .red)
             return
@@ -211,7 +216,24 @@ final class NotchboardViewModel {
     }
 
     // MARK: Navigation / filters
-    var activeGroupID: String = "users"
+    /// The group the list is showing.
+    ///
+    /// Reads self-heal. The stored id can go stale without anyone touching it — a teammate
+    /// deletes the group and the tombstone arrives, or a first-connect adopt replaces the
+    /// whole catalogue — and `activeGroup` has always fallen back to the first surviving
+    /// group so the panel keeps rendering. The mutations did not: they addressed the raw
+    /// stored id, so the store's `guard let group = …` dropped them on the floor and the
+    /// user's click did nothing, silently. Resolving on read is what keeps "the group you
+    /// are looking at" and "the group you are writing to" from ever disagreeing again.
+    var activeGroupID: String {
+        get {
+            if workspace.groups[storedActiveGroupID] != nil { return storedActiveGroupID }
+            return workspace.groupOrder.first { workspace.groups[$0] != nil } ?? storedActiveGroupID
+        }
+        set { storedActiveGroupID = newValue }
+    }
+
+    private var storedActiveGroupID: String = "users"
     var currentView: NotchboardPanelView = .list
     var environmentFilter: NBEnvironment = .all
     var searchText: String = ""
@@ -359,19 +381,18 @@ final class NotchboardViewModel {
 
     var activeGroup: NBGroup {
         if let group = workspace.groups[activeGroupID] { return group }
-        if let firstID = workspace.groupOrder.first, let group = workspace.groups[firstID] { return group }
         // Read on nearly every render — an inconsistent workspace must degrade to an empty
-        // group, never trap.
+        // group, never trap. Reached only when the catalogue has no groups at all, since
+        // `activeGroupID` resolves to a surviving group whenever one exists.
         return NBGroup(id: "", label: "elements", singular: "element", secondaryKey: "", fields: [], elements: [])
     }
 
     /// The dictionary key `activeGroup` actually resolves to, or nil when the workspace has
-    /// no groups at all. Mutating writes must go through this — writing through a stale
-    /// `activeGroupID` would mint a phantom group under a bogus key (for example "" after
-    /// the last group is deleted), which the group editor then refuses to touch.
+    /// no groups at all. Creating writes go through this so they can't mint a phantom group
+    /// under a bogus key (for example "" after the last group is deleted), which the group
+    /// editor would then refuse to touch.
     private var resolvedActiveGroupID: String? {
-        if workspace.groups[activeGroupID] != nil { return activeGroupID }
-        return workspace.groupOrder.first { workspace.groups[$0] != nil }
+        workspace.groups[activeGroupID] != nil ? activeGroupID : nil
     }
 
     /// True when this catalogue has no other members, which is the normal case: Notchboard
@@ -706,10 +727,6 @@ final class NotchboardViewModel {
         NBDeeplinkScheme.resolve(deeplinkScheme)
     }
 
-    static func isValidDeeplinkScheme(_ scheme: String) -> Bool {
-        NBDeeplinkScheme.isValid(scheme)
-    }
-
     /// Sets the active collection's deeplink scheme, validating it the same way
     /// `loginOnSim` does so a bad value is refused where it's typed rather than at the
     /// moment someone needs the feature to work.
@@ -841,8 +858,7 @@ final class NotchboardViewModel {
         // The production-mixing speed bump, once, at the moment of commitment — not on
         // every environment chip (first team test: per-toggle prompts read as spam, and
         // half of them interrupted combinations the user was about to change anyway).
-        if elementForm.environments.contains(.prd), elementForm.environments.count > 1,
-           !suppressProductionMixWarning {
+        if elementForm.environments.mixesProductionWithOthers, !suppressProductionMixWarning {
             let answer = confirmProductionMix(trimmedName)
             if answer.suppressFuture { suppressProductionMixWarning = true }
             guard answer.confirmed else { return } // stay on the form, nothing saved
@@ -888,14 +904,6 @@ final class NotchboardViewModel {
     }
 
     // MARK: - Actions: new/edit group
-
-    func addNewGroupField() {
-        groupForm.addField()
-    }
-
-    func removeNewGroupField(_ id: UUID) {
-        groupForm.removeField(id)
-    }
 
     func saveGroup() {
         let name = groupForm.name.trimmingCharacters(in: .whitespacesAndNewlines)

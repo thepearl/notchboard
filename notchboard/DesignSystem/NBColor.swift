@@ -70,11 +70,6 @@ enum NBColor {
     static let typeUrl = Color(hex: 0x7ab8ff)
     static let typePicker = Color(hex: 0xffd27a)
 
-    // MARK: Brand avatar colors (team member avatars in onboarding)
-    static let memberPurple = Color(hex: 0x6d5ce6)
-    static let memberPink = Color(hex: 0xd65c8b)
-    static let memberTeal = Color(hex: 0x3a8f6d)
-
     // MARK: Onboarding title bar (fake macOS window chrome)
     static let titleBar = Color(hex: 0x17191d)
     static let trafficRed = Color(hex: 0xff5f57)

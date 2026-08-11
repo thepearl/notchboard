@@ -62,7 +62,7 @@ itself). Expected timings assume a normal connection.
 
 **T1 — host creates the room**
 Host: collection ▾ menu (next to the collection name in the panel header) → "set up team
-room…" → enter the broker address, room name, Generate a password → Join Room.
+room" → enter the broker address, room name, Generate a password → Join Room.
 Expected: a "joining…" toast, then within a few seconds a "room connected · 1 online"
 toast, the small square in the header turns green, and the menu item now reads
 "room: <name> · connected".
@@ -75,7 +75,7 @@ base64 — decode it if you're curious: broker address and room name are there, 
 credential is ciphertext, the room password is nowhere).
 
 **T3 — joiner pastes and joins**
-Joiner: collection ▾ menu → "join with an invite…" → paste the line → type the room
+Joiner: collection ▾ menu → "join with an invite" → paste the line → type the room
 password → Join. (A brand-new user can do the same during onboarding via the
 "join a team room" starting point.) Count what you typed: it should be exactly one
 password, even on a broker that requires an account.
@@ -169,10 +169,11 @@ Expected: they get exactly one copy of every element (same count as everyone els
 nobody else's catalogue grows. "3 online" everywhere.
 
 **T18 — leaving is clean**
-One joiner: ▾ menu → "leave room…" → confirm.
+One joiner: ▾ menu → "leave room" → confirm.
 Expected: the dot returns to amber, the collection keeps everything it had, edits made by
-others no longer arrive, and the others' headers drop by one. Rejoining later via the
-▾ menu asks for the password again (it was removed from the Keychain).
+others no longer arrive, and the others' headers drop by one. Leaving forgets the room
+entirely (address included, and the password is removed from the Keychain), so the ▾ menu
+offers "join with an invite" again — rejoining needs the invite line and the password.
 
 **T19 — quit and relaunch**
 Host: quit Notchboard entirely, relaunch.

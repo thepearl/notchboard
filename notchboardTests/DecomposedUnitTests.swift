@@ -264,14 +264,6 @@ struct ToastCenterTests {
         #expect(center.items.count == ToastCenter.visibleLimit)
         #expect(center.items.last?.message == "toast \(ToastCenter.visibleLimit + 2)", "the newest always survives")
     }
-
-    @Test("clear empties it")
-    func clears() {
-        let center = ToastCenter()
-        center.post("x", color: .green)
-        center.clear()
-        #expect(center.items.isEmpty)
-    }
 }
 
 @Suite("NBDeeplinkScheme")

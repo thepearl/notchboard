@@ -55,6 +55,46 @@ struct PhantomGroupTests {
         #expect(vm.workspace.groups["ghost-group"] == nil)
         #expect(vm.workspace.groups[realGroupID]?.elements.contains { $0.name == "element via stale id" } == true)
     }
+
+    /// The audit's headline finding: the list rendered a fallback group while every element
+    /// mutation still addressed the stale stored id, so the store dropped the write and the
+    /// user's click did nothing at all — no change, no toast, no error. A teammate deleting
+    /// the group you are looking at is the way into that state, and nothing repaired it.
+    @Test("A remote group deletion leaves element actions working on what the list shows")
+    func mutationsFollowTheRenderedGroupAfterRemoteDeletion() {
+        let vm = NotchboardViewModel()
+        vm.selfMemberID = "me"
+        vm.store.selfMemberID = "me"
+        let deletedGroupID = vm.workspace.groupOrder[0]
+        let survivingGroupID = vm.workspace.groupOrder[1]
+        vm.activeGroupID = deletedGroupID
+
+        // A peer deletes that group; the tombstone arrives through the remote-apply path,
+        // which deliberately never touches navigation state.
+        _ = vm.store.applyRemoteGroupTombstone(
+            groupID: deletedGroupID, collectionID: vm.activeCollectionID,
+            deletedAt: Date(), by: "someone-else"
+        )
+
+        #expect(vm.activeGroup.id == survivingGroupID, "the panel renders the surviving group")
+        #expect(vm.activeGroupID == survivingGroupID, "and addresses the same one")
+
+        guard let element = vm.activeGroup.elements.first else {
+            Issue.record("seed group has no elements")
+            return
+        }
+        // Asserted as a flip, not as "== true": the seed's first product is already
+        // favourited, and a landed toggle turns it off.
+        let wasFavorite = element.isFavorite
+        vm.toggleFavorite(element.id)
+        #expect(vm.selectedElement(id: element.id)?.isFavorite == !wasFavorite, "favourite must land")
+
+        vm.claimOrRelease(element.id)
+        #expect(vm.selectedElement(id: element.id)?.claimedBy?.who == "me", "in-use mark must land")
+
+        vm.deleteElement(element.id)
+        #expect(vm.selectedElement(id: element.id) == nil, "delete must land")
+    }
 }
 
 @Suite("Schema designer field keys")

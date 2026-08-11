@@ -39,13 +39,21 @@ final class SimulatorWindowTracker {
     private var timer: Timer?
     private var lastReadAt = Date.distantPast
 
+    /// Cached because `desiredInterval` is consulted on every one of the 60 ticks a second
+    /// and `NSWorkspace.frontmostApplication` is a cross-process lookup, not a field read.
+    /// Activation notifications are exact and arrive far less often than the timer does.
+    private var simulatorIsFrontmost = false
+    private var activationObservers: [NSObjectProtocol] = []
+
     /// True while an AX read is in flight on a background task — skips further ticks so
     /// reads never pile up behind a slow/hung Simulator process.
     private var isReadingFrame = false
 
     func start() {
         stop()
-        // A 60Hz heartbeat whose ticks are almost always a two-comparison no-op:
+        observeActivation()
+        // A 60Hz heartbeat whose ticks are a date comparison against a cached Bool, and
+        // one `NSEvent.pressedMouseButtons` read while Simulator is frontmost:
         // `desiredInterval` decides how fresh the frame needs to be right now, and only
         // an overdue tick pays for an AX read.
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
@@ -63,7 +71,7 @@ final class SimulatorWindowTracker {
     /// How stale the frame is allowed to be, by what the user could be doing to the
     /// Simulator window right now.
     private var desiredInterval: TimeInterval {
-        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.simulatorBundleID else {
+        guard simulatorIsFrontmost else {
             return 0.35 // background app: presence tracking is all that's needed
         }
         // Frontmost + button down is the only state a live drag can happen in — follow
@@ -74,6 +82,26 @@ final class SimulatorWindowTracker {
     func stop() {
         timer?.invalidate()
         timer = nil
+        for observer in activationObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        activationObservers = []
+    }
+
+    /// Keeps `simulatorIsFrontmost` current from activation events rather than asking the
+    /// workspace 60 times a second.
+    private func observeActivation() {
+        simulatorIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.simulatorBundleID
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification] {
+            activationObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.simulatorIsFrontmost =
+                        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.simulatorBundleID
+                }
+            })
+        }
     }
 
     // No `deinit { stop() }`: deinit is nonisolated, and calling the main-actor-isolated
@@ -128,7 +156,9 @@ final class SimulatorWindowTracker {
         // read on the main thread, so the flip height is captured here and passed along.
         guard !isReadingFrame else { return }
         guard let screenHeight = Self.primaryScreenHeight else {
-            simulatorWindowFrame = nil
+            // Through setFrame like every other write: a direct assignment here skipped the
+            // equality guard (re-rendering observers at poll rate) and the onUpdate callback.
+            setFrame(nil)
             return
         }
         isReadingFrame = true

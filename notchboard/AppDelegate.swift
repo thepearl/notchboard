@@ -303,7 +303,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func joinRoomWithInviteFromMenu() {
+        revealPanelForFeedback()
         viewModel.joinWithInviteFromMenu()
+    }
+
+    /// Menu-bar flows report themselves in toasts, and toasts only render in an expanded
+    /// panel (collapsed it is 36pt wide, so one clips to its own status dot). Every menu
+    /// action whose outcome the user has to see opens the panel first — including its
+    /// failures, which are the ones that must not disappear.
+    private func revealPanelForFeedback() {
+        viewModel.isExpanded = true
+        updatePanelFrame()
     }
 
     @objc private func toggleFallbackFromMenu() {
@@ -325,6 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func exportCollectionFromMenu() {
+        revealPanelForFeedback()
         guard let url = WorkspaceFileDialogs.chooseExportDestination(defaultName: viewModel.workspace.name) else { return }
         // Password after destination: cancelling the password prompt costs nothing, whereas
         // deriving a key before knowing whether the user even picks a file would waste the
@@ -346,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Imports one collection per chosen file, each added *alongside* the existing ones —
     /// import destroys nothing (vision.md §14, plan Phase 2).
     @objc private func importCollectionsFromMenu() {
+        revealPanelForFeedback()
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.notchboardCollection, .json]
         panel.allowsMultipleSelection = true
@@ -374,6 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func restoreSnapshotFromMenu() {
+        revealPanelForFeedback()
         SnapshotRestoreFlow.run(viewModel: viewModel)
     }
 

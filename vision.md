@@ -775,9 +775,9 @@ which is exactly the fresh-eyes value a second human adds:
   colleague's word for the old version). Toggling while composing is prompt-free.
 - **The notch "wasn't really helping".** Two rounds: the first replaced the rotated
   count with upright in-use/free/online counts at 36×190 — and Ghazi's same-day retest
-  killed that too ("too big, the infos are not useful"). Final form is 36×110 (wider
-  than the original 28, and shorter) showing exactly two things: the connection dot and
-  the expand chevron. A lesson recorded for the next redesign impulse: the notch is a
+  killed that too ("too big, the infos are not useful"). Final form is 36×62 (wider
+  than the original 28 and far shorter, after two more rounds the same evening) showing
+  exactly two things: the connection dot and the expand chevron. A lesson recorded for the next redesign impulse: the notch is a
   door handle, not a dashboard. Still nothing animates at rest.
 
 Also added on request: a Settings toggle for notification sound (on by default — the
@@ -874,6 +874,47 @@ list; the ones that changed a decision rather than a number:
 - **Delete-group was a button that became another button.** Confirmation belongs in an
   alert with the element count, and the destructive action belongs in the header, not at
   the bottom of a scroll view.
+
+### 13.14 The audit (2026-08-09)
+
+A five-dimension audit (dead code, the staged diff, the hard constraints, SwiftUI/AppKit
+correctness, docs-vs-code) with every finding independently re-verified before being acted
+on. 29 raw findings; the ones that were real and are now fixed:
+
+- **Element actions silently dropped after a remote group deletion.** `activeGroup` fell
+  back to the first surviving group so the panel kept rendering, but every mutation
+  (favourite, in-use mark, delete, take-over) still addressed the stale stored id, and the
+  store's `guard let group` dropped the write with no toast and no error — the click just
+  did nothing. Reachable whenever a teammate deletes the group you are looking at, and the
+  first-connect adopt hits it too. `activeGroupID` now resolves on read, so "the group you
+  see" and "the group you write to" cannot disagree; `DataIntegrityTests` covers it.
+- **"Copy room invite" was permanently broken for a broker with a username and no
+  password.** The guard against copying an unsealed invite keyed off "the URL carries a
+  username", which for that configuration never becomes true — and the toast told the user
+  to try again in a moment, forever. The race it defended against barely exists (a
+  collection gains its room config in the same place the seal is written), so the guard is
+  gone.
+- **Changing only the broker username kept the old account's sealed password.** The
+  carry-forward matched on host and room; it now matches the username too.
+- **Menu-bar flows reported into a panel that renders nothing.** Export, import, restore
+  and join-with-invite all toast, and toasts are gated on an expanded panel — so from the
+  menu bar they were silent, failures included. Those four now open the panel first.
+- Dead code removed: `costNote` (three paragraphs of UI prose with no UI), `AvatarBubble`
+  and the three member-avatar colours (leftovers from the pre-invite onboarding),
+  `addNewGroupField`/`removeNewGroupField`, `chipCornerRadius`, `ToastCenter.clear`, and
+  `isValidDeeplinkScheme` (a wrapper that let its tests exercise the wrapper instead of the
+  validator). The production-mix predicate existed twice, spelled out by hand in the view
+  model and as a property on the model; it now lives once, on `Set<NBEnvironment>`.
+- **`nbHoverColor` never coloured anything** — it set `.foregroundStyle` outside a Button
+  whose label already set its own, and the innermost wins. Both hover states work now.
+- The tracker's 60Hz heartbeat asked `NSWorkspace.frontmostApplication` on every tick,
+  described in its own comment as "a two-comparison no-op". That lookup is now cached off
+  activation notifications, and one poll-path write that bypassed the equality guard goes
+  through it.
+
+Refuted on verification (recorded so they don't get re-reported): the seed data's demo
+members are not dead code, and moving them to the test target would split a contract the
+seed's own tests rely on.
 
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
