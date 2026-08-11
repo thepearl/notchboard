@@ -31,7 +31,11 @@ enum NBStartingPoint: String, CaseIterable, Identifiable {
         switch self {
         case .sample: return "4 groups · 20 elements to poke at"
         case .empty: return "one “users” group, nothing in it"
-        case .importFile: return "exported from another mac · secrets aren't included"
+        // Not "secrets aren't included": an export seals every secret-typed value into the
+        // file under the export password (WorkspaceTransfer.exportData). Telling the user the
+        // file is inert is the one stale claim that points the dangerous way, and it read as
+        // self-contradictory anyway — the very next dialog asks for the password that opens it.
+        case .importFile: return "exported from another mac · needs its file password"
         case .joinTeam: return "paste the invite a teammate sent · one password"
         }
     }

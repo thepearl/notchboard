@@ -1,7 +1,7 @@
 # NotchDemo
 
 A minimal iOS app that receives Notchboard's debug-login deeplink. It exists so the
-"⚡ login on sim" path can be exercised end to end against a real app, instead of stopping at
+"login on sim" path can be exercised end to end against a real app, instead of stopping at
 the `simctl` boundary.
 
 It also doubles as the reference integration: what a real team's app has to add to work with
@@ -16,8 +16,8 @@ xcrun simctl install booted build/Debug-iphonesimulator/NotchDemo.app
 xcrun simctl launch booted flourix.notchdemo
 ```
 
-Then in Notchboard, open any element with a username and hit "⚡ login on sim". The scheme is
-already set to `notchdemo` in Settings → Simulator deeplink.
+Then in Notchboard, set the scheme to `notchdemo` under Settings, Simulator deeplink (it starts
+empty, and it is per collection). Open any element with a username and hit "login on sim".
 
 To drive it by hand:
 

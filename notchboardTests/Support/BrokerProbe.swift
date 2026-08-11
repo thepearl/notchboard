@@ -2,9 +2,10 @@
 //  BrokerProbe.swift
 //  notchboardTests
 //
-//  The self-skip gate for suites that need a real MQTT broker: a plain TCP connect to
+//  The skip gate for suites that need a real MQTT broker: a plain TCP connect to
 //  localhost:1883 (no MQTT handshake, so a hung broker still skips fast). Shared by
-//  MosquittoIntegrationTests and PeerHarnessTests so the probe can't drift between them.
+//  MosquittoIntegrationTests and PeerHarnessTests so the probe can't drift between them,
+//  and read from their `.enabled(if:)` traits — which is why it cannot be private to either.
 //
 
 import Foundation

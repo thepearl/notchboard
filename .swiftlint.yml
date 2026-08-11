@@ -6,8 +6,8 @@ excluded:
   - notchboard.xcodeproj
 
 disabled_rules:
-  # The design system deliberately uses numeric literals for layout (padding, sizes) that
-  # are one-off to a single view; the shared ones already live in NBMetrics.
+  # There are no TODO comments in this repo and there is no intention of adding any: work
+  # that matters goes in vision.md section 13 or an issue, not a marker nobody re-reads.
   - todo
 
 opt_in_rules:
@@ -70,11 +70,11 @@ nesting:
 force_unwrapping:
   severity: warning
 
+# AX APIs return a CFTypeRef that needs the checked-then-forced bridge cast; those sites
+# verify CFGetTypeID first, which is the safe idiom for that C API.
 force_cast:
   severity: warning
 
-# AX APIs return CFTypeRef that genuinely needs the checked-then-forced bridge cast; those
-# sites verify CFGetTypeID first, which is the safe idiom for that C API.
 custom_rules:
   no_raw_hex_color:
     name: "Raw hex colour outside the design system"

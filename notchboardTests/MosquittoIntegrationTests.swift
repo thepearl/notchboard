@@ -7,8 +7,10 @@
 //  prove is the MQTT-shaped behaviour itself — retained storage and clears, the
 //  noLocal/barrier-echo subscription trick, the Last Will firing on an ungraceful drop.
 //
-//  Self-skips when nothing listens on localhost:1883 (the SimctlBridgeIntegrationTests
-//  pattern: probe, then `try #require`). Run one with:
+//  Skipped as a whole when nothing listens on localhost:1883, via an `.enabled(if:)` suite
+//  trait. It has to be the trait: Swift Testing has no in-body skip, so the earlier
+//  `try #require` gate recorded a failed expectation and turned every clean clone's first
+//  test run red. Run a broker with:
 //
 //      brew install mosquitto && mosquitto -p 1883 -v
 //
@@ -21,13 +23,10 @@ import Network
 import Testing
 @testable import notchboard
 
-@Suite("MQTT transport against a local mosquitto", .serialized)
+@Suite("MQTT transport against a local mosquitto", .serialized,
+       .enabled(if: BrokerProbe.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883"))
 @MainActor
 struct MosquittoIntegrationTests {
-
-    // MARK: Broker probe — shared (Support/BrokerProbe.swift)
-
-    private static var hasLocalBroker: Bool { BrokerProbe.hasLocalBroker }
 
     /// Distinct rooms per test run so retained state from an earlier run can't leak in.
     private let room = "it-\(UUID().uuidString.prefix(8).lowercased())"
@@ -62,7 +61,6 @@ struct MosquittoIntegrationTests {
 
     @Test("Connects, then disconnects cleanly")
     func connectDisconnect() async throws {
-        try #require(Self.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883")
         let transport = makeTransport(memberID: "m1")
         let inbox = wire(transport)
 
@@ -76,7 +74,6 @@ struct MosquittoIntegrationTests {
 
     @Test("A retained message survives for a later subscriber; an empty publish clears it")
     func retainedRoundTrip() async throws {
-        try #require(Self.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883")
         let topic = "nb/\(room)/el/users/e1"
         let payload = Data("sealed-bytes".utf8)
 
@@ -118,7 +115,6 @@ struct MosquittoIntegrationTests {
 
     @Test("noLocal holds for room topics, and the own barrier still echoes back")
     func noLocalAndBarrierEcho() async throws {
-        try #require(Self.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883")
         let transport = makeTransport(memberID: "m1")
         let inbox = wire(transport)
         transport.connect()
@@ -139,7 +135,6 @@ struct MosquittoIntegrationTests {
 
     @Test("An ungraceful drop fires the Last Will; a graceful disconnect doesn't")
     func lastWillOnUngracefulDrop() async throws {
-        try #require(Self.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883")
         let willTopic = "nb/\(room)/presence/dying"
 
         let watcher = makeTransport(memberID: "watcher")
@@ -174,7 +169,6 @@ struct MosquittoIntegrationTests {
 
     @Test("Two real transports move one element end to end")
     func twoTransportsConverge() async throws {
-        try #require(Self.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883")
         let a = makeTransport(memberID: "ma")
         let b = makeTransport(memberID: "mb")
         let aInbox = wire(a)

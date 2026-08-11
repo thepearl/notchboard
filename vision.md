@@ -916,6 +916,111 @@ Refuted on verification (recorded so they don't get re-reported): the seed data'
 members are not dead code, and moving them to the test target would split a contract the
 seed's own tests rely on.
 
+### 13.15 Getting publishable (2026-08-11)
+
+An eight-dimension audit aimed at one question: what stops a stranger cloning this repo and
+using the app? Sixteen agents, every finding re-checked by a second one told to refute it.
+79 findings, 1 refuted, 14 more surfaced by the verifiers. The code came out better than the
+packaging did — the git history holds no secrets across 31 commits, the crypto has no
+key-management defect, and dead code is close to zero — so almost everything below is at the
+edges rather than in the app.
+
+**The four that made publication impossible.**
+
+- **No LICENSE.** Default copyright means all rights reserved, so nobody had permission to
+  clone, build or use it. Apache-2.0 now, matching the whole dependency stack (all eight SPM
+  packages are Apache-2.0), with `THIRD-PARTY-NOTICES.md` for the attribution that Apache §4
+  requires the moment a built binary is attached to a release.
+- **Nobody but the author could build it.** `DEVELOPMENT_TEAM = D8L4KTPGCD` was baked into all
+  six build configurations, so a clone failed with "No signing certificate 'Mac Development'
+  found". Every configuration is now manual, team-less, `CODE_SIGN_IDENTITY = "-"`.
+- **The README described a different application** — "no backend, so nothing syncs between
+  machines… deliberately not started", written before the room shipped. Roughly a third of its
+  checkable statements were false, including one pointing the dangerous way: "secret-typed
+  field values never enter… an export", when an export carries every one of them sealed under
+  the export password. The same false claim was in the product, on onboarding's import option.
+  Rewritten, plus the two guides that never existed (`INSTALL.md`, `USAGE.md`).
+- **macOS 26.3 as the deployment target**, inherited from the Xcode template rather than from
+  any API. The source compiles clean at 14.0 and fails only at 13.0, on `@Observable`. Lowered
+  to 14.0, which is the difference between almost no Macs and almost all of them.
+
+**The test suite was never green on anyone else's machine.** The three environment-dependent
+suites gated on `try #require`, which in Swift Testing records a failed expectation — there is
+no in-body skip. A clean clone running the documented command got 17 red tests and a
+`** TEST FAILED **`, and CI could only ever be red. They are `.enabled(if:)` suite traits now,
+which report as skipped and keep the run green: 278 tests, 56 suites, no broker, no simulator.
+The "self-skips" comments that asserted the old behaviour are corrected in all three files.
+
+**The fonts were never real.** `NBFont` asked for Space Grotesk and JetBrains Mono by name and
+silently got system fallbacks on any machine without them — including this one, which has no
+Space Grotesk at all. Every screenshot to date was the system font wearing the design system's
+sizes. Both are now bundled under OFL-1.1 (regular, medium and bold, the weights the call sites
+actually use) and registered at launch by `NBBundledFonts`, with a test that fails if either
+family stops resolving.
+
+**Day-one bugs a stranger would have hit before anyone else.**
+
+- **Onboarding could not be finished without the Accessibility grant**, and the undocked panel
+  that exists for exactly that case was suppressed while onboarding showed. A managed Mac where
+  the toggle will not stick had no way into the app at all. There is a "continue without
+  docking" button now.
+- **The app vanished the moment setup finished** if Simulator was not running: the panel
+  collapsed to a notch with nothing to dock to and was ordered out, and the toast meant to
+  explain it was posted into an overlay gated on the panel being expanded. All three signals
+  failed at once and the user was left with a menu-bar glyph. Onboarding now lands in the
+  undocked panel, and `fallbackPanelVisible` moved to the view model so both the menu item and
+  onboarding write one flag.
+- **Two rooms on one broker evicted each other forever.** The MQTT client id was
+  `nb-<memberID>`, and MQTT requires a broker to kill the existing session when a new CONNECT
+  arrives with the same id, so two collections on one HiveMQ account flapped at roughly 1Hz,
+  each cycle re-running a full retained replay. The id now carries a room fingerprint.
+
+**And the rest of the fixed list.** A mark released while this Mac was asleep was never cleared,
+because a release publishes an empty payload that deletes the retained topic rather than sending
+a message, so nothing arrived to clear it and `claimOrRelease` refuses to release someone else's
+mark — the row stayed in use forever. A complete replay now treats the room's retained claims as
+authoritative for other people's marks. An unreachable broker posted a red toast on every
+reconnect attempt (1, 2, 4, … 60 seconds, one stream per room) because the state write was
+equality-guarded and the event beside it was not. One retained message the room key could not
+open failed the whole join, and could abort mid-apply after the adopt-time reset had already
+emptied the local catalogue: replay now fails closed only when *no* payload opens, and skips
+foreign ones the way live traffic already did. Group-empty collections were silently deleted at
+the next launch, taking the collection's name, deeplink scheme and room config with them, so
+deleting the sample groups to make room for your own schema and quitting lost the collection and
+left the team room without saying so. "Replay Onboarding" replaced the active collection and its
+Keychain secrets from one unconfirmed click. A state file that could not be read restarted setup
+in silence, which from the user's chair is indistinguishable from the app losing their data.
+Changing a room password in place bricked the room for everyone, the host included, since the
+retained tree stays sealed under the old key — the dialog refuses it now and asks for a new room
+name, but only when the password actually differs, so re-opening setup to fix a broker account
+still works.
+
+**A hang the audit did not find, and the tests did.** After the signing change the whole suite
+started deadlocking, 326 tests started and none finishing. A stack sample put the main thread
+inside `SnapshotStore.deviceKey()` → `SecItemCopyMatching` → securityd → `mach_msg`, waiting
+forever. A Keychain item's ACL is bound to the binary that created it, an ad-hoc signature *is*
+the binary's hash, so every rebuild is a new application as far as macOS is concerned and
+securityd raises a modal asking the user to approve it. A headless test run can never answer that
+modal. The device key now has the same override seam `directoryURL` already had, so no test
+touches the real login Keychain — which is what CLAUDE.md's isolation rule always required.
+The user-facing half is documented in INSTALL.md's troubleshooting: click Always Allow, or sign
+with a Developer ID for a stable identity. It is the first concrete cost of the ad-hoc default,
+and worth remembering when the notarisation question comes up.
+
+**Deliberately not changed.** No minimum length on the room or export password: the generator is
+one click away on both fields and both dialogs say so, and a floor would be paternalism rather
+than a fix. The real answer, if this ever matters, is pre-filling a generated passphrase.
+
+**Packaging.** CI moved to a self-hosted macOS runner driven by fastlane, mirroring
+`dream-deco-ios`, with no deploy lane — the old workflow triggered on `main` while the branch is
+`master`, so it had never run once, and pinned `macos-15`, which cannot build this project
+anyway. `Casks/notchboard.rb` plus `scripts/release.sh` and `docs/RELEASING.md` prepare a
+Homebrew tap install. A bare `brew install notchboard` needs homebrew/cask acceptance, which
+needs notability and a notarised binary, so it is not on the table yet and the docs say so
+plainly. The app also has an icon for the first time, which matters because the two places a
+first-run user must go — the Accessibility list and Login Items — are exactly where a generic
+placeholder undermines trust.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between

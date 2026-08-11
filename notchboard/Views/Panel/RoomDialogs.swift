@@ -117,6 +117,18 @@ enum RoomDialogs {
                 complaint = "The room password seals every payload — it can't be empty. Generate makes a strong one."
                 continue
             }
+            // Refuse a rotation in place, and ONLY a rotation: re-opening this dialog to fix a
+            // broker account and retyping the same room password stays a supported flow.
+            //
+            // Everything the broker holds is retained ciphertext under the old key and nothing
+            // purges it, so pointing an existing room at a new password leaves a room nobody
+            // can open, the host included. A fresh room name is a working room, and re-inviting
+            // is one click.
+            if let current, current.room == slug,
+               let stored = RoomKeyStore.roomPassword(for: current), stored != passwordText {
+                complaint = "“\(slug)” already has a password, and changing it here would lock everyone out. Pick a new room name instead."
+                continue
+            }
             return RoomSetup(
                 config: NBRoomConfig(brokerURL: finalURL, room: slug),
                 roomPassword: passwordText,

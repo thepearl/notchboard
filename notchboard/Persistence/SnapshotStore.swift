@@ -146,7 +146,17 @@ enum SnapshotStore {
     /// Loads the sealing key, creating it on first use. Returns nil only when the Keychain
     /// refuses both read and write (locked/denied) — snapshots pause rather than falling
     /// back to writing plaintext.
+    ///
+    /// Stands in for the Keychain key in tests, the same seam `directoryURL` already provides for
+    /// the snapshot folder. Reading the real item is not merely untidy in a test, it can block
+    /// forever: a generic-password ACL is bound to the binary that created it, the app is ad-hoc
+    /// signed so a clone builds with no Apple account, and every rebuild is therefore a new code
+    /// identity that securityd asks the user to approve. A headless run can never answer that
+    /// modal, so the whole suite deadlocked on the main actor inside `SecItemCopyMatching`.
+    static var deviceKeyOverride: SymmetricKey?
+
     private static func deviceKey() -> SymmetricKey? {
+        if let deviceKeyOverride { return deviceKeyOverride }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keyService,

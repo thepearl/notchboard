@@ -133,8 +133,14 @@ final class RoomSession {
         case .connected:
             beginReplay()
         case .failed(let message):
+            // Only on the transition into failure. The transport retries with backoff and
+            // reports every attempt, so an unreachable broker — a mistyped host, a closed lid
+            // on a train — used to post a red toast every 1, 2, 4, … 60 seconds for as long as
+            // the app ran, one stream per room. `setState` was already guarded; the event was
+            // not, which bypassed the guard right beside it.
+            let wasAlreadyFailed = state == .failed(message)
             setState(.failed(message))
-            onEvent?(.failed(message))
+            if !wasAlreadyFailed { onEvent?(.failed(message)) }
         case .disconnected:
             // A drop mid-session: surface it, keep working locally. The transport owns
             // reconnecting; a successful reconnect restarts replay via .connected.
@@ -163,7 +169,7 @@ final class RoomSession {
             try? await Task.sleep(for: Self.replayQuietFallback)
             guard !Task.isCancelled else { return }
             Self.logger.warning("replay barrier never returned — finishing replay on the quiet-period fallback")
-            self?.finishReplay()
+            self?.finishReplay(barrierReturned: false)
         }
     }
 
@@ -171,7 +177,7 @@ final class RoomSession {
         guard let topic = SyncTopic.parse(message.topic, room: config.room) else { return }
         if isReplaying {
             if case .syncBarrier(let memberID) = topic, memberID == selfMemberID {
-                finishReplay()
+                finishReplay(barrierReturned: true)
             } else if case .syncBarrier = topic {
                 // someone else joining — not our replay's business
             } else {
@@ -184,7 +190,11 @@ final class RoomSession {
 
     // MARK: Replay
 
-    private func finishReplay() {
+    /// `barrierReturned` distinguishes a complete replay (our own barrier came back, so the
+    /// broker has handed over everything it holds) from the quiet-period fallback, which may
+    /// have seen only part of the room. Anything that treats the room as authoritative must
+    /// only act on the former.
+    private func finishReplay(barrierReturned: Bool) {
         guard isReplaying else { return }
         isReplaying = false
         replayFallback?.cancel()
@@ -201,16 +211,27 @@ final class RoomSession {
             }
         }
 
-        // Prove the password BEFORE any destructive step: one authenticated payload is
-        // proof for all of them (same key), and emptying the local catalogue on the
+        // Prove the password BEFORE any destructive step: emptying the local catalogue on the
         // strength of ciphertext we can't even read would turn a typo into data loss.
-        if let sealed = buffer.first(where: { !$0.payload.isEmpty })?.payload,
-           (try? RoomCrypto.open(sealed, key: codec.key)) == nil {
-            Self.logger.error("replay payload failed authentication — wrong room password")
+        //
+        // "Can ANY sealed payload be opened", not "does an arbitrary first one open". The topic
+        // grammar namespaces a room by its slug alone, so a single foreign retained message —
+        // another team that picked the same slug, or anything at all published to an open
+        // broker's `nb/#` — used to read exactly like a wrong password and fail the whole join.
+        // A wrong password cannot open ANY of them, which is the signal worth failing closed on.
+        let key = codec.key
+        let sealedPayloads = buffer.map(\.payload).filter { !$0.isEmpty }
+        let openableCount = sealedPayloads.filter { (try? RoomCrypto.open($0, key: key)) != nil }.count
+        let sealedCount = sealedPayloads.count
+        if sealedCount > 0, openableCount == 0 {
+            Self.logger.error("no replay payload authenticated — wrong room password")
             setState(.failed("wrong room password"))
             transport.disconnect(publishingLastWill: false)
             onEvent?(.wrongPassword)
             return
+        }
+        if openableCount < sealedCount {
+            Self.logger.error("skipping \(sealedCount - openableCount, privacy: .public) retained payload(s) this room key cannot open")
         }
 
         if !roomIsEmpty, !config.firstSyncCompleted {
@@ -222,7 +243,6 @@ final class RoomSession {
         }
 
         let summary = apply(buffer)
-        guard state != .failed("wrong room password") else { return }
 
         if roomIsEmpty {
             seedRoom()
@@ -237,9 +257,38 @@ final class RoomSession {
             store.setRoomConfig(config, collectionID: collectionID)
         }
 
+        // Only on a complete replay: a truncated one looks like "nobody holds anything" and
+        // would wrongly free every row in the collection.
+        if barrierReturned { clearForeignClaimsAbsentFromRoom(summary) }
+
         transport.publish(presenceMessage(.online))
         setState(.connected)
         onEvent?(.connected(onlineCount: onlineMemberIDs.count))
+    }
+
+    /// Drops any mark held by someone else that the room no longer carries.
+    ///
+    /// Releasing publishes an EMPTY payload, which deletes the retained topic rather than
+    /// sending a "released" message. So a teammate who released while this Mac was asleep left
+    /// nothing behind to arrive on reconnect: the row stayed "in use by them" forever, and
+    /// `claimOrRelease` refuses to release a mark you don't own, so the user could not clear it
+    /// either. After a complete replay the room's retained claims are authoritative for other
+    /// people's marks, and absence means free.
+    ///
+    /// Own marks are deliberately untouched: reconcilePush re-publishes those.
+    private func clearForeignClaimsAbsentFromRoom(_ summary: ReplaySummary) {
+        guard let workspace = currentWorkspace else { return }
+        for group in workspace.groups.values {
+            for element in group.elements {
+                guard let claim = element.claimedBy,
+                      claim.who != selfMemberID,
+                      summary.claims[element.id] == nil else { continue }
+                // The emission-free remote-apply path: this is the room telling us, not a
+                // local edit, so it must not travel back out (CLAUDE.md sync invariant 1).
+                _ = store.applyRemoteClaim(nil, claimantName: "", elementID: element.id,
+                                           collectionID: collectionID, selfID: selfMemberID)
+            }
+        }
     }
 
     private struct ReplaySummary {
@@ -279,13 +328,11 @@ final class RoomSession {
             do {
                 _ = try applyOne(topic: topic, message: message, summary: &summary)
             } catch TransferCrypto.CryptoError.wrongPassword {
-                // GCM authenticated failure on retained state = the room password is
-                // wrong. Fail loudly and stop — never merge half a room.
-                Self.logger.error("replay payload failed authentication — wrong room password")
-                setState(.failed("wrong room password"))
-                transport.disconnect(publishingLastWill: false)
-                onEvent?(.wrongPassword)
-                return summary
+                // Skip, exactly as the live path does. Aborting here was worse than useless:
+                // finishReplay has already proved the key opens this room, so a payload that
+                // fails now is a foreign message on a shared topic tree, and returning early
+                // left the catalogue half-applied on top of an adopt-time reset.
+                Self.logger.error("replay payload failed authentication on \(message.topic, privacy: .public) — ignored")
             } catch {
                 Self.logger.error("unreadable replay payload on \(message.topic, privacy: .public): \(error)")
             }

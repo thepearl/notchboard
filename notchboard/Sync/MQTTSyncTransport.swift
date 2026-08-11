@@ -25,6 +25,7 @@
 //    keeps working locally.
 //
 
+import CryptoKit
 import Foundation
 import MQTTNIO
 import NIOCore
@@ -49,8 +50,15 @@ final class MQTTSyncTransport: SyncTransport {
 
     private let endpoint: Endpoint?
     private let addressProblem: String?
-    /// Stable per-member client id ("nb-<memberID>"): a second connect from the same Mac
-    /// supersedes the old broker session instead of ghosting beside it.
+    /// Stable per-member *per-room* client id: a second connect from the same Mac to the same
+    /// room supersedes the old broker session instead of ghosting beside it.
+    ///
+    /// The room fingerprint is not decoration. MQTT requires a broker to evict the existing
+    /// session when a new CONNECT arrives with the same client id, so a plain "nb-<memberID>"
+    /// made two collections joined to two rooms on ONE broker — the natural setup with a single
+    /// HiveMQ or EMQX account — kick each other in a permanent ~1s loop, each eviction re-running
+    /// a full retained replay. Hashed rather than appended raw because a room slug has no length
+    /// bound and some brokers still cap the client id.
     private let clientIdentifier: String
     /// The broker account's password (persona 2's shared credential — HiveMQ Cloud and
     /// friends). NOT the room password, which never reaches the transport at all; it only
@@ -74,7 +82,7 @@ final class MQTTSyncTransport: SyncTransport {
     private static let maxReconnectDelay: TimeInterval = 60
 
     init(config: NBRoomConfig, memberID: String, brokerPassword: String? = nil) {
-        self.clientIdentifier = "nb-\(memberID)"
+        self.clientIdentifier = Self.clientIdentifier(memberID: memberID, room: config.room)
         self.brokerPassword = brokerPassword
         switch Self.parse(config.brokerURL) {
         case .usable(let endpoint):
@@ -90,6 +98,19 @@ final class MQTTSyncTransport: SyncTransport {
         // MQTTNIO traps if a client deallocates without shutdown. Normal teardown goes
         // through disconnect(); this is the safety net for a dropped session.
         try? client?.syncShutdownGracefully()
+    }
+
+    /// One id per (member, room) pair, stable across relaunches.
+    ///
+    /// SHA-256 rather than `hashValue`: Swift seeds its hasher per process, so a `hashValue`
+    /// suffix would change on every launch and the reconnect after a crash would ghost beside
+    /// its own dead session instead of replacing it.
+    nonisolated static func clientIdentifier(memberID: String, room: String) -> String {
+        let fingerprint = SHA256.hash(data: Data(room.utf8))
+            .prefix(4)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "nb-\(memberID)-\(fingerprint)"
     }
 
     // MARK: SyncTransport

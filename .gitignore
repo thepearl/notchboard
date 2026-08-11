@@ -19,3 +19,9 @@ DerivedData/
 # Claude Code local settings
 .claude/settings.local.json
 *.profraw
+
+# fastlane regenerates both on every run, so they show up dirty after any local lane.
+# Gemfile.lock is deliberately NOT here: committing it is what makes CI resolve the same
+# fastlane version every time instead of drifting.
+fastlane/report.xml
+fastlane/README.md

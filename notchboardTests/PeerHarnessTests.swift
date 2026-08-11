@@ -18,11 +18,10 @@ import Network
 import Testing
 @testable import notchboard
 
-@Suite("Two full peers over real MQTT", .serialized)
+@Suite("Two full peers over real MQTT", .serialized,
+       .enabled(if: BrokerProbe.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883"))
 @MainActor
 struct PeerHarnessTests {
-
-    private static var hasLocalBroker: Bool { BrokerProbe.hasLocalBroker }
 
     private let key = SymmetricKey(data: Data(repeating: 11, count: 32))
     private let room = "hz-\(UUID().uuidString.prefix(8).lowercased())"
@@ -83,9 +82,11 @@ struct PeerHarnessTests {
 
     @Test("Seed, adopt, live edit, claim with presence, delete, and a graceful goodbye")
     func fullLifecycle() async throws {
-        try #require(Self.hasLocalBroker, "no broker on localhost:1883 — start one with: mosquitto -p 1883")
         SnapshotStore.directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("nb-harness-\(UUID().uuidString)", isDirectory: true)
+        // And the key, so no test ever reaches the real login Keychain — reading the real
+        // item can block on an approval modal a headless run cannot answer.
+        SnapshotStore.deviceKeyOverride = SymmetricKey(data: Data(repeating: 3, count: 32))
 
         // ── Ghazi's Mac seeds the room.
         let ghazi = Peer(memberID: "hz-ghazi", name: "ghazi", workspace: seededWorkspace())

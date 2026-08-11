@@ -4,11 +4,17 @@
 //
 //  Local snapshots (vision.md §14.5.2) and the passphrase generator (§14.5.3). Snapshot
 //  tests point the store at a scratch directory and run serialized, because directoryURL
-//  is shared static state. The device key they exercise is the real Keychain item — a
-//  single stable entry under flourix.notchboard.device, harmless on a dev machine.
+//  is shared static state.
+//
+//  They point the device key at a fixed value too. Reading the real Keychain item is not just
+//  untidy: its ACL is bound to the binary that created it, the app is ad-hoc signed so every
+//  rebuild is a new code identity, and securityd then puts up a modal asking the user to
+//  approve the new binary. A headless run cannot answer it, so the whole suite deadlocked on
+//  the main actor inside SecItemCopyMatching.
 //
 
 import AppKit
+import CryptoKit
 import Foundation
 import Testing
 @testable import notchboard
@@ -20,6 +26,10 @@ struct SnapshotStoreTests {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("nb-snapshot-tests-\(UUID().uuidString)", isDirectory: true)
         SnapshotStore.directoryURL = url
+        // A fixed key rather than the real Keychain item. The round trip is what these tests
+        // are about, and reading the real item can block on an approval modal that a headless
+        // run cannot answer — which deadlocked the whole suite on the main actor.
+        SnapshotStore.deviceKeyOverride = SymmetricKey(data: Data(repeating: 3, count: 32))
         return url
     }
 

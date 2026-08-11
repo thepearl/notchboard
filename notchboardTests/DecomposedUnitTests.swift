@@ -103,12 +103,29 @@ struct CollectionStoreTests {
         #expect(remaining.isEmpty)
     }
 
-    @Test("adoptPersisted falls back to seed data when nothing usable survives")
-    func adoptPersistedFallsBack() {
+    /// A group-empty collection is KEPT, name and settings intact. It used to be dropped, which
+    /// silently destroyed a collection mid-build: delete the sample groups to make room for your
+    /// own schema, quit before creating the first one, and the next launch had thrown the
+    /// collection away along with its deeplink scheme and its room config. Empty is not corrupt,
+    /// and "＋ new group" is right there in the tab bar.
+    @Test("adoptPersisted keeps a collection whose groups were all deleted")
+    func adoptPersistedKeepsGroupEmptyCollection() {
         let store = CollectionStore()
         let empty = NBCollection(workspace: NBWorkspace(name: "hollow", groupOrder: [], groups: [:], members: [:]))
         store.adoptPersisted([empty], activeID: empty.id, selfMemberID: "me")
-        #expect(!store.workspace.groups.isEmpty, "a collection with no groups can't hold anything")
+        #expect(store.collections.count == 1)
+        #expect(store.workspace.name == "hollow", "the collection survives with its name")
+        #expect(store.activeCollectionID == empty.id)
+    }
+
+    /// The fallback that remains: nothing to restore at all still seeds rather than leaving the
+    /// app with no collection, which no screen can render.
+    @Test("adoptPersisted falls back to seed data when there is no collection at all")
+    func adoptPersistedFallsBackOnNothing() {
+        let store = CollectionStore()
+        store.adoptPersisted([], activeID: "", selfMemberID: "me")
+        #expect(!store.collections.isEmpty)
+        #expect(!store.workspace.groups.isEmpty, "the seed catalogue is what a first launch shows")
     }
 
     @Test("Schema edits preserve values through a relabel")

@@ -1,118 +1,161 @@
 # Notchboard
 
-A macOS utility that docks a shared, claimable catalogue of test accounts and fixtures to the
-iOS Simulator window, so mobile teams stop hunting for working logins in Slack.
+A macOS menu-bar app that docks a shared catalogue of test accounts and fixtures to the iOS
+Simulator window.
 
-Notchboard runs as a menu-bar agent (no Dock icon). It finds the real Simulator window via the
-Accessibility API and attaches a slim notch to its edge. Click the notch and the catalogue
-opens next to the app you are testing: browse or search test accounts, see who has claimed
-what, claim one yourself, and fire a debug deeplink straight into the booted simulator.
+Every mobile team keeps its working logins somewhere bad. A pinned Slack message, a Notion page
+nobody updates, a note on someone's second monitor. You lose a minute finding the staging account,
+another minute discovering a teammate is already logged into it, and you retype the password by
+hand into the simulator.
 
-Product source of truth is [vision.md](vision.md). Section 13 is the running implementation log.
+Notchboard puts that catalogue next to the simulator you are already looking at. It attaches a slim
+notch to the edge of the Simulator window and follows it as the window moves. Click the notch and
+the list opens: search, pick an account, copy it or fire it straight into the booted app as a
+deeplink. Mark it "in use" and the rest of the team sees it is taken.
 
-## Status
+There is no backend. The app is local-first, and teams that want live sharing join an
+end-to-end-encrypted room on any standard MQTT broker.
 
-Local-only prototype. The full docking shell and catalogue work against on-disk data. There is
-no backend, so nothing syncs between machines and other teammates' claims are seed data. Backend
-and workspace sync are the next phase, deliberately not started.
+## What it does
+
+- Multiple collections, Postman style, each with its own groups, schemas and settings.
+- Groups with editable field schemas, and elements with typed fields (text, secret, number, url,
+  date, bool, picker).
+- Environments per element (`DEV`, `STG`, `PRD`, and an element can sit in more than one),
+  favourites, search and keyboard navigation.
+- Marking an element "in use", which teammates in the same room see, with automatic release after
+  an idle window you set (5 to 240 minutes, 60 by default).
+- A deeplink bridge that fires `<scheme>://debug/login?...` into the booted simulator through
+  `xcrun simctl openurl`, plus a plain copy button for logins a deeplink cannot drive (SSO or
+  WebView screens).
+- Encrypted `.notchboard` export files, and encrypted local snapshots with restore from the menu
+  bar.
+- Optional end-to-end-encrypted team rooms over MQTT, joined with one pasted invite line and one
+  room password.
+- Global shortcuts, ⌃K to open the panel with the search field focused and ⌃N to add an element.
+  They only fire while Xcode, Simulator or Notchboard is frontmost, and the modifier is a setting
+  (⌃, ⌘ or ⌥⌘).
 
 ## Requirements
 
-- macOS 26.3 or later
-- Xcode 26.6 or later
-- Accessibility permission, granted to the built app in System Settings → Privacy & Security →
-  Accessibility. Docking cannot work without it: reading another app's window frame is exactly
-  what the permission gates.
-- Simulator.app running, for the docked presentation. Without it the panel is still reachable
-  undocked from the menu bar.
+- macOS 14.0 or later.
+- Xcode to build. There is no prebuilt download yet, so building from source is the only way to get
+  the app today. [INSTALL.md](INSTALL.md) explains why, and which Xcode version the project needs.
+- Simulator.app running for the docked presentation, and a booted simulator for the deeplink
+  bridge. Without either, the panel is still usable, undocked, from the menu bar.
+- Accessibility permission granted to the app in System Settings, Privacy and Security,
+  Accessibility. Reading another app's window frame is exactly what that permission gates, so
+  docking cannot work without it.
 
-## Build and run
+The app is not notarised and is not on the App Store. A copy you built yourself is not quarantined,
+so Gatekeeper does not block it.
 
-```bash
-xcodebuild -project notchboard.xcodeproj -scheme notchboard -configuration Debug build
-```
-
-Verification build with no signing:
+## Quick start
 
 ```bash
-xcodebuild -project notchboard.xcodeproj -scheme notchboard -configuration Debug build CODE_SIGNING_ALLOWED=NO
+git clone https://github.com/thepearl/notchboard.git
 ```
 
-Tests (Swift Testing, hosted in the app target):
+Open `notchboard.xcodeproj` and run. A fresh clone builds with no Apple developer account and no
+team, because signing is ad-hoc and the development team is left empty.
 
-```bash
-xcodebuild -project notchboard.xcodeproj -scheme notchboard -destination 'platform=macOS' test
+Full instructions, including where the built app lands and how to grant Accessibility, are in
+[INSTALL.md](INSTALL.md). Day-to-day use is in [USAGE.md](USAGE.md).
+
+## How docking works
+
+Notchboard runs as an agent, so it has no Dock icon and never takes focus away from Simulator or
+Xcode. Its panel is a borderless non-activating window, which is why you can type in its search
+field while Simulator stays frontmost.
+
+To dock, the app polls the Accessibility API for Simulator's real window frame and repositions
+itself against it, faster while you are dragging the window and slower when nothing is moving.
+That is the only thing the Accessibility permission is used for. If the permission is missing or
+Simulator is not running, the menu bar still opens the panel as a normal floating window, and
+onboarding has a "continue without docking" path for Macs where the permission toggle will not
+stick.
+
+## Team rooms
+
+A collection can join a room on any standard MQTT broker. Peers exchange sealed messages through
+it, so edits, new elements and in-use marks propagate to everyone else's Mac as they happen. The
+broker holds retained messages, which is how someone who joins later gets the whole catalogue with
+no history protocol of our own.
+
+Joining is one pasted invite line plus one room password. The host picks "copy room invite" from
+the collection menu in the panel header, sends the line however they like, and shares the room
+password separately.
+[USAGE.md](USAGE.md) walks through hosting and joining, including which brokers work.
+
+## Security and privacy
+
+Read this before putting anything sensitive into a room or an export file.
+
+Every room payload is sealed with AES-GCM under a key derived from the room password (PBKDF2, then
+HKDF with a room-specific salt). The broker relays bytes it cannot read. Send the wrong room
+password and messages fail to open cleanly rather than being applied as garbage.
+
+The room password is the entire security boundary. It is shared out of band, like a wifi password,
+and never travels in an invite or an export file. The dialog that creates a room puts a "Generate"
+button next to the password field, and so does the export password prompt. Using it is a good idea.
+
+Topic names are not encrypted. A broker operator sees the room name, your group names (a topic path
+carries the group's slug), how many members are connected, and the shape and timing of the traffic.
+On a public broker, so does everyone else. Pick a room name that gives nothing away, and prefer a
+broker you control.
+
+An export file protects secret-typed values only. Element names, usernames, notes, schemas and
+environments are readable plaintext in the file. In-use marks are stripped on export, so nobody's
+name travels with it. The plaintext is a deliberate trade-off, documented in vision.md 13.9: being
+able to open a collection file and read it is worth the debuggability. The per-field lever is the
+field type. Mark a field secret and its value moves into the encrypted envelope. A file is exactly
+as strong as the password you gave it.
+
+There is one place a password leaves the Keychain in the clear. `simctl` takes the deeplink URL as
+a command-line argument, so while that short-lived process runs, a password in the query is
+readable by other processes running as you. There is no argv-free way to hand `simctl` a URL.
+These are shared test credentials on a local developer tool, so the exposure is accepted and
+documented rather than hidden. Everything under the app's control (its own log lines and `simctl`'s
+echoed stderr) is redacted. See the header of `notchboard/Docking/SimctlBridge.swift`.
+
+Removing someone from a room means picking a new room name and a new room password, then sending a
+fresh invite to everyone else. There is no server, so there is nobody to revoke them at.
+
+## Where your data lives
+
+```
+~/Library/Application Support/Notchboard/state.json   collections and settings
+~/.notchboard/snapshots/                              encrypted snapshots
 ```
 
-The app has no Dock icon. Its entry points are the menu-bar item and the panel itself.
+`state.json` holds no secret values. Secret-typed fields are replaced by placeholders and the real
+values live in the login Keychain, under three services:
 
-## Using it
+- `flourix.notchboard.secrets` for secret field values.
+- `flourix.notchboard.rooms` for room passwords.
+- `flourix.notchboard.device` for the key that seals snapshots, which is why snapshots do not
+  travel between Macs.
 
-Onboarding runs on first launch: name, invite code (any code of six or more characters, since
-there is no backend yet), then the Accessibility grant. After that the notch docks itself to
-Simulator.
+A `state.json` that cannot be decoded is moved aside to `state.json.corrupt` instead of being
+discarded, and the app tells you it happened. Delete the file to simulate a first launch.
 
-- Click the notch, or press ⌃K, to open the catalogue and focus search.
-- ⌃N adds an element. Arrow keys move through the list, Return opens a row, Esc goes back.
-- Claiming an element copies its primary field and marks it in use for the team. Claims
-  auto-release after the idle window set in Settings.
-- "Login on sim" fires `<scheme>://debug/login?user=…` into the booted simulator via
-  `xcrun simctl openurl`. Set the scheme in Settings, and have your app's debug build register
-  it and handle that route. For logins a deeplink cannot drive (SSO or WebView screens), use
-  "copy login + password · mark in use" instead.
-- The menu-bar item also exports and imports a workspace as JSON, replays onboarding, and shows
-  the panel undocked when Simulator is not available.
+To move a collection to another Mac, export it. The export password restores the secrets on the
+other side. Copying `state.json` alone leaves secret fields empty, because the Keychain entries
+stay behind.
 
-The global chords are registered with Carbon's `RegisterEventHotKey`, so they are genuinely
-consumed rather than merely observed. That means Notchboard owns the chord while it holds it,
-so it only holds it while you are actually in the iOS-development context: the registration is
-claimed when Xcode, Simulator or Notchboard is frontmost and the panel can respond, and handed
-straight back otherwise. Switch to Terminal and ⌃K is `kill-line` again.
+## Licence
 
-The modifier is a setting (Settings → Behavior → Global shortcut), because the choice is a real
-tradeoff and only you know which you can spare:
+Apache-2.0. See [LICENSE](LICENSE).
 
-| Modifier | What it costs |
-| --- | --- |
-| ⌃ Control (default) | ⌃K/⌃N are Cocoa text bindings (delete-to-end-of-paragraph, move-down) and shell bindings (kill-line, down-line-or-history) |
-| ⌘ Command | ⌘N is New File in Xcode, ⌘K is Clear Console. Convenient to type, but it collides where you'd use it |
-| ⌥⌘ Option-Command | Collides with essentially nothing, and matches what comparable menu-bar utilities ship |
+Third-party components and their licences are listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The bundled fonts, Space Grotesk and JetBrains
+Mono, are under the SIL Open Font License 1.1.
 
-Inside the panel, plain ⌘K and ⌘N always work regardless of that setting, since there is nothing
-to collide with in Notchboard's own window.
+## Design reasoning
 
-## Where data lives
+[vision.md](vision.md) is the product specification. Section 13 is the running implementation log,
+including the things that were tried and abandoned. Section 14 is the sync design.
 
-Workspace data and settings are one versioned JSON file:
-
-```
-~/Library/Application Support/Notchboard/state.json
-```
-
-Delete it to simulate a first launch. A file that cannot be decoded is moved aside to
-`state.json.corrupt` rather than discarded.
-
-Secret-typed field values never enter that file, or an export. They live in the login Keychain
-under the service `flourix.notchboard.secrets`, keyed `<elementID>.<fieldKey>`. One consequence
-worth knowing: carry a `state.json` to another machine without its Keychain and secret fields
-load empty, by design in a build with no sync.
-
-The deeplink is the one place a password leaves the Keychain in the clear: `simctl` takes the
-URL as a command-line argument, so while that short-lived process runs the password is visible
-to other processes running as you. There is no argv-free way to hand `simctl` a URL. These are
-shared test credentials on a local dev tool, so the exposure is accepted and documented rather
-than hidden — see the header of `Docking/SimctlBridge.swift`.
-
-## Architecture
-
-`AppDelegate` is the composition root: it owns the borderless non-activating panel, the
-menu-bar item, the Settings window, the global shortcut monitors, and the timer that keeps the
-panel docked to Simulator's live window frame.
-
-State lives in three `@Observable` classes: `NotchboardViewModel` (catalogue, navigation,
-forms, toasts, settings), `OnboardingViewModel` (the four-step flow), and
-`SimulatorWindowTracker` (polls the Accessibility API for Simulator's window).
-
-See [CLAUDE.md](CLAUDE.md) for the constraints that are load-bearing — the disabled App Sandbox,
-the non-activating panel, the coordinate conversion, and the panel's animation budget — none of
-which are safe to change casually.
+[CLAUDE.md](CLAUDE.md) is the working document for anyone changing the code. It lists the
+constraints that are load-bearing, such as the disabled App Sandbox, the non-activating panel and
+the animation budget, none of which are safe to change casually.

@@ -317,7 +317,7 @@ struct RemoteApplyTests {
         var incoming = el
         incoming.name = "remote edit"
         incoming.updatedAt = base.addingTimeInterval(60)
-        store.applyRemoteElement(incoming, groupID: "users", collectionID: cid, now: base.addingTimeInterval(120))
+        _ = store.applyRemoteElement(incoming, groupID: "users", collectionID: cid, now: base.addingTimeInterval(120))
 
         let stored = store.element(el.id, group: "users", collection: cid)
         #expect(stored?.name == "remote edit")
@@ -345,9 +345,9 @@ struct RemoteApplyTests {
     func newerEditResurrects() {
         let el = element(updatedAt: base)
         let (store, cid, _) = makeStore([el])
-        store.applyRemoteElementTombstone(elementID: el.id, groupID: "users", collectionID: cid,
-                                          deletedAt: base.addingTimeInterval(60), by: "peer-b",
-                                          now: base.addingTimeInterval(120))
+        _ = store.applyRemoteElementTombstone(elementID: el.id, groupID: "users", collectionID: cid,
+                                              deletedAt: base.addingTimeInterval(60), by: "peer-b",
+                                              now: base.addingTimeInterval(120))
 
         var revived = el
         revived.name = "back"
@@ -437,7 +437,7 @@ struct RemoteApplyStructureTests {
         let fresh = NBGroup(id: "back", label: "back", singular: "back", secondaryKey: "k",
                             fields: [NBField(key: "k", label: "k", type: .text)], elements: [],
                             updatedAt: groupStamp.addingTimeInterval(200))
-        store.applyRemoteSchema(fresh, sortIndex: 0, collectionID: cid, now: groupStamp.addingTimeInterval(240))
+        _ = store.applyRemoteSchema(fresh, sortIndex: 0, collectionID: cid, now: groupStamp.addingTimeInterval(240))
         #expect(store.applyRemoteGroupTombstone(groupID: "back", collectionID: cid,
                                                 deletedAt: groupStamp.addingTimeInterval(150), by: "peer-b",
                                                 now: groupStamp.addingTimeInterval(240)) == .ignored)
@@ -466,8 +466,8 @@ struct RemoteApplyStructureTests {
     func remoteReleaseReportsFreed() {
         let el = element()
         let (store, cid, _) = makeStore([el])
-        store.applyRemoteClaim(NBClaim(who: "lina-id"), claimantName: "lina",
-                               elementID: el.id, collectionID: cid, selfID: "me")
+        _ = store.applyRemoteClaim(NBClaim(who: "lina-id"), claimantName: "lina",
+                                   elementID: el.id, collectionID: cid, selfID: "me")
 
         let outcome = store.applyRemoteClaim(nil, claimantName: "", elementID: el.id, collectionID: cid, selfID: "me")
         guard case .freed(let freed) = outcome else {

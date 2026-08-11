@@ -109,6 +109,9 @@ struct SealedBrokerCredentialTests {
     func sealTravelsAndUnseals() {
         SnapshotStore.directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("nb-cred-\(UUID().uuidString)", isDirectory: true)
+        // And the key, so no test ever reaches the real login Keychain — reading the real
+        // item can block on an approval modal a headless run cannot answer.
+        SnapshotStore.deviceKeyOverride = SymmetricKey(data: Data(repeating: 3, count: 32))
         let broker = LoopbackBroker()
 
         // The host types the broker password exactly once.

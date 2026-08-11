@@ -60,10 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyModifier: NBHotKeyModifier?
     private var localKeyMonitor: Any?
 
-    /// Menu-bar fallback (vision.md §9): when true and no Simulator window is available to
-    /// dock to, the panel shows undocked (centred once, then user-draggable) instead of
-    /// hiding. Docking always takes precedence the moment Simulator is visible again.
-    private var fallbackPanelVisible = false
+    /// Mirrors `viewModel.fallbackPanelVisible` in the menu (vision.md §9). The flag itself
+    /// lives on the view model, because onboarding also has to be able to set it.
     private var fallbackMenuItem: NSMenuItem?
 
     private static let shortcutLog = Logger(subsystem: "flourix.notchboard", category: "shortcuts")
@@ -91,6 +89,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let (viewModel, onboarding) = Self.makeViewModels()
         self.viewModel = viewModel
         self.onboarding = onboarding
+
+        // Say so when the catalogue could not be opened. The reset itself is by design (no
+        // pre-release migrations), but it used to happen in silence: onboarding simply
+        // appeared, which from the user's chair is indistinguishable from the app having
+        // thrown their data away.
+        if AppStateStore.didTakeCorruptBackupOnLoad {
+            reportCorruptStateReset()
+        }
 
         // Sweep Keychain entries no element references any more — deleting state.json (the
         // documented reset path) used to orphan every secret of the old workspace forever.
@@ -317,12 +323,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleFallbackFromMenu() {
-        setFallbackVisible(!fallbackPanelVisible)
+        setFallbackVisible(!viewModel.fallbackPanelVisible)
     }
 
     private func setFallbackVisible(_ visible: Bool) {
-        fallbackPanelVisible = visible
-        fallbackMenuItem?.title = visible ? "Dock to Simulator Again" : "Show Panel (Undocked)"
+        viewModel.fallbackPanelVisible = visible
         if visible {
             viewModel.isExpanded = true
             viewModel.showCoachMark = false
@@ -332,6 +337,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitFromMenu() {
         NSApp.terminate(nil)
+    }
+
+    /// One alert, at the only moment it is true: the launch that moved the file aside.
+    private func reportCorruptStateReset() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Your catalogue couldn't be opened"
+        alert.informativeText = "Setup starts fresh. The file it couldn't read is kept beside it as state.json.corrupt."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Show in Finder")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([AppStateStore.corruptBackupURL])
+        }
     }
 
     @objc private func exportCollectionFromMenu() {
@@ -412,8 +431,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let view = SettingsView(viewModel: viewModel, onReplayOnboarding: { [weak self] in
-            self?.onboarding.reset()
-            self?.viewModel.replayOnboarding()
+            guard let self else { return }
+            // Replaying is not a tour. Step 3 applies a starting point, so finishing it with
+            // the default choice loads the sample catalogue over the active collection and
+            // deletes its Keychain secrets — from one unconfirmed click on the only
+            // reset-looking control in Settings, with no way back out once inside.
+            guard OnboardingDialogs.confirmReplay(
+                collectionName: viewModel.workspace.name,
+                elementCount: viewModel.workspace.elementCount
+            ) else { return }
+            onboarding.reset()
+            viewModel.replayOnboarding()
         })
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
@@ -495,7 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// equality-guarded like everything else on that tick.
     private func syncPanelLevel() {
         guard panel != nil else { return }
-        let shouldFloat = onboarding.isPresented || fallbackPanelVisible || simulatorOrSelfIsFrontmost
+        let shouldFloat = onboarding.isPresented || viewModel.fallbackPanelVisible || simulatorOrSelfIsFrontmost
         let level: NSWindow.Level = shouldFloat ? .floating : .normal
         guard panel.level != level else { return }
         panel.level = level
@@ -527,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// hidden/minimized keeps `isSimulatorRunning` true while the panel is ordered out, and
     /// stale state would surface later as a panel reopening in a view the user never chose.
     private var panelIsInteractable: Bool {
-        if fallbackPanelVisible { return true }
+        if viewModel.fallbackPanelVisible { return true }
         return tracker.isSimulatorRunning && tracker.simulatorWindowFrame != nil && panel.isVisible
     }
 
@@ -616,7 +644,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel.pendingCoachMark = false
             viewModel.showCoachMark = true
             viewModel.isExpanded = false
+            // Onboarding parked the user undocked because docking was impossible at the time.
+            // Simulator is here now and the coach mark is about to explain the notch, so take
+            // the dock back. Set directly rather than through setFallbackVisible, which would
+            // re-enter this method.
+            viewModel.fallbackPanelVisible = false
         }
+
+        // Derived, not set imperatively: onboarding can now turn the fallback on too, and a
+        // title written only by the menu handler would have gone stale.
+        let fallbackTitle = viewModel.fallbackPanelVisible ? "Dock to Simulator Again" : "Show Panel (Undocked)"
+        if fallbackMenuItem?.title != fallbackTitle { fallbackMenuItem?.title = fallbackTitle }
 
         // Onboarding always shows regardless of whether Simulator happens to be running yet —
         // setup shouldn't require Simulator to already be open. Positioned once on entry
@@ -639,7 +677,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Simulator running the menu item silently did nothing — which is exactly how it
         // read to the first team ("doesn't seem to do anything at all"). Docking resumes
         // when the user asks for it back, not the moment Simulator reappears.
-        if fallbackPanelVisible {
+        if viewModel.fallbackPanelVisible {
             layoutFallbackPanel(panel)
             return
         }

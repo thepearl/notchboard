@@ -266,8 +266,12 @@ final class CollectionStore {
             // retention window they are dead weight (matching the broker-side expiry).
             restored[index].workspace.tombstones.removeAll { $0.deletedAt < tombstoneCutoff }
         }
-        // A collection with no groups can't hold or accept anything.
-        restored.removeAll { $0.workspace.groups.isEmpty }
+        // Group-empty collections are KEPT. Dropping them silently destroyed a collection the
+        // user was in the middle of building: delete the sample groups to make room for your
+        // own schema, quit before creating the first one, and on relaunch the collection was
+        // gone — name, per-collection deeplink scheme and room config with it, so the Mac also
+        // left the team room without saying so. A collection with no groups is empty, not
+        // corrupt, and "＋ new group" is right there in the tab bar to refill it.
         if restored.isEmpty {
             restored = [NBCollection(workspace: MockData.workspace())]
         }

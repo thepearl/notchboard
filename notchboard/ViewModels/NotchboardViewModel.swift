@@ -48,6 +48,13 @@ final class NotchboardViewModel {
     /// deferred until Simulator first appears instead of being silently skipped — the
     /// unexplained 28pt notch was the only thing a Simulator-less onboarder ever saw.
     var pendingCoachMark: Bool = false
+    /// The menu-bar fallback (vision.md §9): show the panel undocked instead of hiding it
+    /// when there is no Simulator window to dock against. AppDelegate reads this on its
+    /// reposition tick.
+    ///
+    /// Lives here rather than in AppDelegate because two places set it — the menu item and
+    /// the end of onboarding, which needs somewhere to land a user whose Mac cannot dock.
+    var fallbackPanelVisible: Bool = false
 
     // MARK: Identity (vision.md §14.2 — the standing prerequisite for any future sync)
     /// Stable local member id: what this user's claims are attributed to.

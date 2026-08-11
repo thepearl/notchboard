@@ -23,9 +23,14 @@ detects the test environment and returns early — tests never start the panel, 
 monitors, and never read or write the user's real `state.json`. Keep that guard intact when touching
 AppDelegate's startup, or a test run will start mutating real state.
 
-Two suites talk to a real MQTT broker (`MosquittoIntegrationTests`, `PeerHarnessTests`) and
-self-skip when nothing listens on localhost:1883 — boot one before trusting a green run to
-cover them:
+Three suites need something the machine may not have and are gated by a **suite-level
+`.enabled(if:)` trait**, never by `try #require` inside a test body: Swift Testing has no in-body
+skip, so a `#require` gate records a failed expectation and turns a clean clone's first test run
+red. `MosquittoIntegrationTests` and `PeerHarnessTests` need a broker on localhost:1883
+(`BrokerProbe`), `SimctlBridgeIntegrationTests` needs a booted simulator (`SimulatorProbe`). Both
+probes live in `notchboardTests/Support/` rather than inside the suites, because a trait written
+in the attribute cannot reach a `private static` of the type it annotates. Boot a broker before
+trusting a green run to cover the room:
 
 ```bash
 brew install mosquitto && /opt/homebrew/opt/mosquitto/sbin/mosquitto -p 1883
@@ -43,7 +48,18 @@ To exercise docking at runtime you need Simulator.app running and the Accessibil
 - The app runs as an agent via `NSApp.setActivationPolicy(.accessory)` in `AppDelegate` (not `LSUIElement` in Info.plist — the Info.plist is generated, `GENERATE_INFOPLIST_FILE = YES`).
 - Accessibility API coordinates are top-left origin relative to the primary screen (the one whose AppKit frame origin is zero). AppKit is bottom-left origin. The conversion lives in `Docking/SimulatorWindowTracker.swift`. AX reads run on a background task because they can block for seconds when Simulator is busy. NSScreen reads stay on the main thread.
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on. Everything is main-actor by default. Be explicit when moving work off the main actor.
-- Deployment target macOS 26.3, Swift 5 mode, hardened runtime on, no entitlements file.
+- Deployment target macOS 14.0, Swift 5 mode, hardened runtime on, no entitlements file. 26.3 was
+  an Xcode template default, not a requirement: the source compiles clean at 14.0 and fails only at
+  13.0, on `@Observable`.
+- **Signing is manual, team-less and ad-hoc** (`CODE_SIGN_STYLE = Manual`, `CODE_SIGN_IDENTITY = "-"`,
+  `DEVELOPMENT_TEAM = ""`) in every configuration of both targets, so a fresh clone builds with no
+  Apple account. Do not commit a team id back in. The cost is that an ad-hoc identity is the binary
+  hash, so the Accessibility grant does not survive a rebuild — INSTALL.md tells users that.
+- **Both design-system fonts are bundled** (`notchboard/Fonts`, OFL-1.1) and registered at first use
+  by `NBBundledFonts`, not by `ATSApplicationFontsPath` — the app target is a synchronized folder
+  group, so Xcode flattens `Fonts/` into `Contents/Resources` and the key would point at nothing.
+  Before this, `NBFont` asked for typefaces that were installed on nobody's machine and silently got
+  system fallbacks. `BundledFontTests` fails if either family stops resolving.
 - **No continuous animation in the panel at rest.** The panel is a transparent window, so every animation frame makes the window server re-blend the whole 404×592 panel plus its 70pt shadow. One pulsing 6pt dot measured ~20% of a CPU core for as long as the panel was open, against ~0.1% with nothing animating (full numbers in vision.md §13.4). Gate any animation behind hover or another interaction, and animate opacity rather than shadow radii or blur. `IdleAnimationGuardTests` fails the build if a `repeatForever` appears without such a gate.
 - **Global shortcuts go through Carbon `RegisterEventHotKey`, never an `NSEvent` global monitor.** A global `NSEvent` monitor observes but cannot consume a keystroke (its handler returns `Void`, deliberately, so a background app can't swallow another app's keys), which is why the earlier version double-triggered Xcode's New File on every ⌘N. `Shortcuts/GlobalHotKeys.swift` owns the Carbon path; this is the same mechanism soffes/HotKey, sindresorhus/KeyboardShortcuts, Maccy and Ice all use, and it needs no TCC permission of its own. Plain chords also work inside the panel via the local monitor, scoped to `event.window === panel`.
 - **A claimed chord is consumed system-wide, so registration is deliberately scoped twice over:** only while the panel can respond, and only while Xcode, Simulator, or Notchboard itself is frontmost (`AppDelegate.hotKeyHostBundleIDs`). That scoping is what makes the default ⌃K/⌃N acceptable at all: ⌃K and ⌃N are real bindings elsewhere (Cocoa's `deleteToEndOfParagraph:`/`moveDown:` per `StandardKeyBinding.dict`, and zsh/bash `kill-line`/`down-line-or-history`), so Notchboard hands them back the moment you switch to Terminal. Do not widen that scope without re-reading vision.md §13.5.
@@ -109,9 +125,9 @@ Secret values never sit in plaintext in any file: `state.json` holds Keychain pl
 
 One deliberate, documented exception to the secrets posture: `simctl` takes the deeplink URL as a command-line argument, so a password passed in the query is visible in the process list to other processes running as you while that short-lived process runs. There is no argv-free way to hand `simctl` a URL. See the header of `Docking/SimctlBridge.swift` — everything under the app's own control (its log lines, and `simctl`'s echoed stderr) is redacted.
 
-## Verification status (2026-08-08, post-invite-redesign)
+## Verification status (2026-08-11, post-publish-audit)
 
-274 tests pass, including three suites that self-skip without their environment: `SimctlBridge` integration (needs a booted simulator), `MosquittoIntegrationTests` and `PeerHarnessTests` (need a broker on localhost:1883) — boot both before trusting a green run to cover everything. The peer harness runs two complete peers (store + engine + real MQTT transport) through the full §14.3 lifecycle against a live mosquitto: seed, adopt, live edit, claim with presence, delete, graceful goodbye, wake-up catch-up. The sealed-broker-credential suite proves an invitee's engine receives the credential it was never given in plaintext, and that a wrong room password builds no transport at all. Release builds with zero warnings in app sources. The room passed its first two-human test over public EMQX (TLS, §13.11), T1–T10. **Not yet exercised:** the invite flow by a second human (the QA plan's T1–T3 were rewritten around it), a broker requiring an account against real HiveMQ Cloud, `wss://`, and the disconnection block T11–T19. See vision.md §13.10–13.12.
+278 tests in 56 suites pass on a machine with **no broker and no booted simulator** — the three environment-dependent suites report as skipped, which is the point of the `.enabled(if:)` conversion (vision.md §13.15). Boot mosquitto and a simulator before trusting a green run to cover the room and the deeplink bridge. The peer harness runs two complete peers (store + engine + real MQTT transport) through the full §14.3 lifecycle against a live mosquitto: seed, adopt, live edit, claim with presence, delete, graceful goodbye, wake-up catch-up. The sealed-broker-credential suite proves an invitee's engine receives the credential it was never given in plaintext, and that a wrong room password builds no transport at all. Release builds with zero warnings in app sources. The room passed its first two-human test over public EMQX (TLS, §13.11), T1–T10. **Not yet exercised:** the invite flow by a second human (the QA plan's T1–T3 were rewritten around it), a broker requiring an account against real HiveMQ Cloud, `wss://`, and the disconnection block T11–T19. See vision.md §13.10–13.12.
 
 ## Known issues (as of 2026-08-07)
 

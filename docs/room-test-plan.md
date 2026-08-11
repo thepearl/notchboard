@@ -24,7 +24,7 @@ Time needed: about 45 minutes with two people. A third person makes T17 possible
 1. macOS 26.3 or newer, Xcode installed.
 2. Clone the repo, open `notchboard.xcodeproj`, build and run the `notchboard` scheme.
 3. Grant Accessibility when asked (System Settings → Privacy & Security → Accessibility).
-   On a managed SQLI Mac this may need an IT exception — if the toggle won't stick,
+   On a Mac managed by an employer this may need an IT exception. If the toggle won't stick,
    that's finding number one.
 4. Walk onboarding. Use your real first name — it labels your activity for the others.
    Pick "start with sample data" (host) or "start empty" (joiners — you'll adopt the
@@ -40,9 +40,8 @@ mqtts://broker.emqx.io:8883
 ```
 
 Pick a room name nobody else on a public broker would guess, with a random suffix, for
-example `sqli-mob-x7k2q`. The host generates the room password with the Generate button
-and shares it over a separate channel (Slack DM is fine — never in the same message as
-the exported file).
+example `acme-mob-x7k2q`. The host generates the room password with the Generate button
+and shares it over a separate channel, never in the same message as the invite.
 
 Brokers with their own account (HiveMQ Cloud, a hardened company mosquitto) work too,
 and only the HOST ever deals with that: put the account username and password in the two
@@ -68,8 +67,8 @@ toast, the small square in the header turns green, and the menu item now reads
 "room: <name> · connected".
 
 **T2 — the invite is one line**
-Host: collection ▾ menu → "copy room invite" → paste it into Slack. Share the room
-password in a separate message.
+Host: collection ▾ menu → "copy room invite" → paste it into your team chat. Share the
+room password in a separate message.
 Expected: one `notchboard-room:…` line, no file. It contains no readable secrets (it's
 base64 — decode it if you're curious: broker address and room name are there, the broker
 credential is ciphertext, the room password is nowhere).

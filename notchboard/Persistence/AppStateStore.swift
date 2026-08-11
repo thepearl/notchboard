@@ -162,7 +162,7 @@ enum AppStateStore {
         directoryURL.appendingPathComponent("state.json")
     }
 
-    private static var corruptBackupURL: URL {
+    static var corruptBackupURL: URL {
         directoryURL.appendingPathComponent("state.json.corrupt")
     }
 
@@ -175,6 +175,14 @@ enum AppStateStore {
     static var corruptBackupExists: Bool {
         FileManager.default.fileExists(atPath: corruptBackupURL.path)
     }
+
+    /// True when THIS launch is the one that moved a state file aside. Distinct from
+    /// `corruptBackupExists`, which stays true for every later launch too.
+    ///
+    /// Without it the reset was silent: `load()` returned nil, the app treated that as a
+    /// first launch and showed onboarding, and from the user's chair a corrupt file and an
+    /// app that threw their catalogue away look identical.
+    private(set) static var didTakeCorruptBackupOnLoad = false
 
     static func load() -> PersistedAppState? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
@@ -195,6 +203,7 @@ enum AppStateStore {
             logger.error("unreadable state file, backing up to state.json.corrupt: \(error)")
             try? FileManager.default.removeItem(at: corruptBackupURL)
             try? FileManager.default.moveItem(at: fileURL, to: corruptBackupURL)
+            didTakeCorruptBackupOnLoad = true
             return nil
         }
     }

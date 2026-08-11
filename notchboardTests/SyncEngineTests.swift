@@ -19,9 +19,12 @@ import Testing
 
 // MARK: - Fixtures
 
-private let roomKey = SymmetricKey(data: Data(repeating: 7, count: 32))
-private let wrongKey = SymmetricKey(data: Data(repeating: 9, count: 32))
-private let roomConfig = NBRoomConfig(brokerURL: "mqtts://broker.test:8883", room: "team")
+// `nonisolated` because these are read from default-argument expressions, which Swift
+// evaluates outside the enclosing actor — and the module defaults every global to MainActor.
+// All three are immutable values of Sendable types, so sharing them is safe.
+private nonisolated let roomKey = SymmetricKey(data: Data(repeating: 7, count: 32))
+private nonisolated let wrongKey = SymmetricKey(data: Data(repeating: 9, count: 32))
+private nonisolated let roomConfig = NBRoomConfig(brokerURL: "mqtts://broker.test:8883", room: "team")
 
 private func seedWorkspace() -> NBWorkspace {
     func el(_ id: String, _ name: String) -> NBElement {
@@ -97,6 +100,9 @@ private final class TransportBox {
 private func redirectSnapshots() {
     SnapshotStore.directoryURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("nb-sync-tests-\(UUID().uuidString)", isDirectory: true)
+    // And the key, so no test ever reaches the real login Keychain — reading the real
+    // item can block on an approval modal a headless run cannot answer.
+    SnapshotStore.deviceKeyOverride = SymmetricKey(data: Data(repeating: 3, count: 32))
 }
 
 // MARK: - Tests

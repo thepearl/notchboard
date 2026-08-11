@@ -1,0 +1,46 @@
+# Notchboard's build entry points, shared by CI and by hand.
+#
+# There is deliberately no deployment here: no match, no App Store Connect key, no TestFlight.
+# The project signs ad-hoc (CODE_SIGN_IDENTITY = "-", DEVELOPMENT_TEAM = "") so that a fresh
+# clone builds with no Apple account, and there is no Appfile for the same reason.
+#
+# The lanes shell out to xcodebuild rather than going through gym/scan. This is a macOS app with
+# one project, one scheme and one destination, so the wrappers would only restate the same
+# arguments, and scan additionally writes report files into fastlane/ that nothing here reads.
+# These are the exact commands documented in CLAUDE.md.
+
+default_platform(:mac)
+
+# Absolute paths, so a lane behaves the same whatever directory fastlane runs the command from.
+PROJECT = File.expand_path("../notchboard.xcodeproj", __dir__)
+SCHEME  = "notchboard"
+
+platform :mac do
+  # Deliberately no CODE_SIGNING_ALLOWED=NO here, unlike the build lane. The suite reaches the
+  # Keychain (SecretsStore, RoomKeyStore), and an unsigned test host has no identity the stored
+  # items trust, so macOS puts up an authorisation panel and the run blocks on a dialog no CI
+  # machine will ever answer. The project signs ad-hoc, which needs no Apple account anyway.
+  desc "Build the app and run the full Swift Testing suite"
+  lane :test do
+    sh(
+      "xcodebuild",
+      "-project", PROJECT,
+      "-scheme", SCHEME,
+      "-destination", "platform=macOS",
+      "test"
+    )
+  end
+
+  desc "Compile the app without signing"
+  lane :build do
+    sh(
+      "xcodebuild",
+      "-project", PROJECT,
+      "-scheme", SCHEME,
+      "-configuration", "Debug",
+      "-destination", "platform=macOS",
+      "build",
+      "CODE_SIGNING_ALLOWED=NO"
+    )
+  end
+end

@@ -3,7 +3,10 @@
 //  notchboard
 //
 //  Typography — Space Grotesk for headers/UI, JetBrains Mono for data & badges.
-//  Falls back to system fonts if the custom fonts aren't bundled/installed yet.
+//
+//  Both are bundled with the app and registered on first use by NBBundledFonts, so these names
+//  resolve on any machine rather than only on one with the fonts installed. If registration is
+//  ever refused, `.custom` falls back to the system font on its own.
 //
 
 import SwiftUI
@@ -11,13 +14,15 @@ import SwiftUI
 enum NBFont {
     /// Headers, names, and general UI copy.
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Space Grotesk", size: size, relativeTo: .body)
+        NBBundledFonts.register()
+        return .custom(NBBundledFonts.uiFamily, size: size, relativeTo: .body)
             .weight(weight)
     }
 
     /// Data, keys, badges, and technical/monospace microcopy.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("JetBrains Mono", size: size, relativeTo: .body)
+        NBBundledFonts.register()
+        return .custom(NBBundledFonts.monoFamily, size: size, relativeTo: .body)
             .weight(weight)
     }
 }

@@ -107,7 +107,7 @@ struct OnboardingView: View {
             onChoose: onChooseStartingPoint,
             onNext: handleNext
         )
-        case 4: PermissionStep(onboarding: onboarding, onNext: handleNext)
+        case 4: PermissionStep(onboarding: onboarding, onNext: handleNext, onSkip: onFinish)
         default: EmptyView()
         }
     }
@@ -391,6 +391,10 @@ private struct StartingPointCard: View {
 private struct PermissionStep: View {
     @Bindable var onboarding: OnboardingViewModel
     let onNext: () -> Void
+    /// Finishes setup without the grant. Docking is the only thing Accessibility buys, and the
+    /// menu-bar panel is a complete way to use the app without it — refusing to finish left a
+    /// managed Mac, where the toggle simply will not stick, with no way into the app at all.
+    let onSkip: () -> Void
 
     /// The system permission dialog is one-shot: once dismissed, repeated "grant access"
     /// clicks silently do nothing. After the first request the button becomes "open
@@ -468,8 +472,24 @@ private struct PermissionStep: View {
 
             Spacer()
 
-            HStack {
+            HStack(spacing: 10) {
                 Spacer()
+                // Only while the grant is missing: once it lands there is nothing to skip, and
+                // an escape hatch beside a working primary action just reads as doubt.
+                if !onboarding.accessibilityGranted {
+                    Button(action: onSkip) {
+                        Text("continue without docking")
+                            .font(NBFont.mono(10.5))
+                            .foregroundStyle(NBColor.textSecondary)
+                            .padding(.horizontal, 16)
+                            .frame(height: 36)
+                            .overlay(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius).stroke(NBColor.border, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: NBMetrics.rowCornerRadius))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.nbPlain)
+                    .help("the panel opens from the menu bar instead. you can grant access later in Settings")
+                }
                 Button(action: onNext) {
                     Text("finish & dock →")
                         .font(NBFont.ui(11.5, weight: .bold))

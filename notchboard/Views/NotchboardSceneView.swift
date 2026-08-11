@@ -202,11 +202,20 @@ struct NotchboardSceneView: View {
 
     private func finishOnboarding() {
         onboarding.isPresented = false
+        // Reads false both when Simulator isn't running and when Accessibility was refused,
+        // which is exactly right: either way there is no window frame to dock against.
+        let canDock = tracker.isSimulatorRunning
         // Coach mark now if Simulator is visible, deferred to its first appearance if not —
         // never silently dropped.
-        viewModel.showCoachMark = tracker.isSimulatorRunning
-        viewModel.pendingCoachMark = !tracker.isSimulatorRunning
-        viewModel.isExpanded = false
+        viewModel.showCoachMark = canDock
+        viewModel.pendingCoachMark = !canDock
+        // Collapsing with nothing to dock to ordered the panel straight out, so the app
+        // vanished the instant setup finished — and took the toast below with it, since the
+        // toast overlay is gated on the panel being expanded. All three signals failed at
+        // once and the user was left with a menu-bar glyph. Land in the undocked panel
+        // instead, which is the same thing the menu item offers.
+        viewModel.fallbackPanelVisible = !canDock
+        viewModel.isExpanded = !canDock
         // The coach mark and a toast are two messages fighting for the same corner of a
         // panel barely wider than the notch, and the coach mark already says the useful
         // half. Whichever is showing, only one speaks.
