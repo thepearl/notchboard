@@ -1,4 +1,4 @@
-# Notchboard
+# Notchboard [![CI](https://github.com/thepearl/notchboard/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/thepearl/notchboard/actions/workflows/ci.yml)
 
 A macOS menu-bar app that docks a shared catalogue of test accounts and fixtures to the iOS
 Simulator window.
