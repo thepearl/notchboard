@@ -5,6 +5,8 @@ on:
     branches: [master]
   push:
     branches: [master]
+  # Run it on demand from the Actions tab or `gh workflow run ci.yml`, without a dummy commit.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,34 +15,47 @@ concurrency:
 jobs:
   build:
     name: Build and test
-    # Self-hosted, because the project needs an Xcode the GitHub-hosted macOS images do not carry.
-    runs-on: [self-hosted, macOS]
+    # PINNED, and the pin is load-bearing. `macos-latest` still points at macOS 15, whose Xcode
+    # is 16.x, and Xcode 16 does not know SWIFT_DEFAULT_ACTOR_ISOLATION. It would ignore the
+    # setting rather than fail on it, and the build then breaks on the first implicitly
+    # main-actor initialiser (verified locally: one error at AppDelegate.swift:58). macOS 26
+    # carries Xcode 26.6, the same build the project is developed against.
+    #
+    # Hosted rather than self-hosted on purpose: this repository is public, so a pull request
+    # from a fork would otherwise execute its own code on a machine we own.
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Set up rbenv
+
+      # Printed rather than assumed. If a future image bumps its default Xcode or Ruby, this is
+      # the line that says so, instead of a compile error a hundred lines down.
+      - name: Show toolchain
         run: |
-          export PATH="$HOME/.rbenv/bin:$PATH"
-          eval "$(rbenv init -)"
-          echo "PATH=$HOME/.rbenv/shims:$HOME/.rbenv/bin:$PATH" >> $GITHUB_ENV
+          xcodebuild -version
+          swift --version
+          ruby --version
+          bundle --version
+
+      # No setup-ruby action: the macos-26 image ships Ruby 3.4 and Bundler already, which
+      # clears fastlane's floor of 3.3. One less dependency, and one less thing to break when
+      # a third-party action lags a new macOS image.
       - name: Install gems
-        run: bundle install
+        run: bundle install --jobs 4 --retry 3
+
       - name: Build and test
         run: bundle exec fastlane test
 
   lint:
     name: SwiftLint
-    runs-on: [self-hosted, macOS]
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      # SwiftLint is already installed on the runner, so this only repairs the PATH: a runner
-      # started by launchd does not always inherit Homebrew's bin directory.
-      # --lenient keeps warnings advisory until the existing ones are burned down. Drop it to
-      # make a warning fail the job.
+
+      # Advisory. --lenient keeps warnings from failing the job until the existing ones are
+      # burned down; drop it to make a warning fail.
       - name: Lint
         run: |
-          if ! command -v swiftlint >/dev/null 2>&1; then
-            export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-          fi
+          brew install swiftlint
           swiftlint lint --lenient --reporter github-actions-logging

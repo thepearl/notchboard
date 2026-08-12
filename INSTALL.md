@@ -13,11 +13,11 @@ signature. The full reasoning and the release process are in [docs/RELEASING.md]
 
 macOS 14.0 (Sonoma) or later. `MACOSX_DEPLOYMENT_TARGET` is 14.0 in every build configuration.
 
-Xcode 26 or later. This one is inferred rather than published: the project file uses the
-synchronised-folder format that needs Xcode 16 at minimum, it is stamped `LastUpgradeVersion = 2660`,
-and it sets `SWIFT_APPROACHABLE_CONCURRENCY`, a Swift 6.2 setting. CI runs on a self-hosted runner
-precisely because the GitHub-hosted macOS images do not carry the Xcode this project wants. If you
-are on an older Xcode, try it and see. The failure will be loud.
+Xcode 26 or later, and this one is measured rather than inferred. The project sets
+`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, which Xcode 16 does not recognise. It ignores the
+setting rather than rejecting it, so the build fails on the first implicitly main-actor
+initialiser instead of on the setting itself. CI pins the `macos-26` image for that reason, since
+`macos-latest` still points at macOS 15. On an older Xcode the failure is loud, not subtle.
 
 A network connection for the first build. The project has one Swift package dependency,
 [mqtt-nio](https://github.com/swift-server-community/mqtt-nio) 2.13.0, which pulls in swift-nio,

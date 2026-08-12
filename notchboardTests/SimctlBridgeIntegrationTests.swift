@@ -7,10 +7,11 @@
 //  `xcrun simctl`, and everything that can go wrong (argument quoting, exit-status
 //  handling, the stderr drain, the completion never firing) only shows up for real.
 //
-//  Skipped as a whole when no simulator is booted, via an `.enabled(if:)` suite trait, so a
-//  machine or CI runner without one still gets a green suite — which the earlier
-//  `try #require` gate did not, since Swift Testing has no in-body skip. Pair it with
-//  SampleApp/NotchDemo, which registers the notchdemo:// scheme — see SampleApp/README.md.
+//  Skipped as a whole unless a booted simulator has SampleApp/NotchDemo installed, via an
+//  `.enabled(if:)` suite trait. Both halves of that gate are load-bearing: NotchDemo is what
+//  registers the notchdemo:// scheme, and without it `simctl openurl` fails with OSStatus
+//  -10814, so a machine with a simulator merely booted got a RED suite rather than a skipped
+//  one. See SampleApp/README.md for the two commands that install it.
 //
 
 import Foundation
@@ -18,7 +19,8 @@ import Testing
 @testable import notchboard
 
 @Suite("SimctlBridge against a real simulator", .serialized,
-       .enabled(if: SimulatorProbe.hasBootedSimulator, "no booted simulator"))
+       .enabled(if: SimulatorProbe.hasNotchDemoInstalled,
+                "needs a booted simulator with NotchDemo installed — see SampleApp/README.md"))
 struct SimctlBridgeIntegrationTests {
 
 
