@@ -1,4 +1,4 @@
-# Notchboard - Shared test accounts and fixtures, docked to your iOS Simulator | macOS, SwiftUI, MQTT, end-to-end encrypted
+# Notchboard - Shared test accounts, docked to your iOS Simulator
 
 Notchboard is a macOS menu-bar app that keeps your team's working test logins next to the simulator
 you are already looking at. It attaches a slim notch to the edge of the Simulator window, follows
