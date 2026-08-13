@@ -249,6 +249,35 @@ struct NBGroup: Identifiable, Codable, Equatable {
     var secretFieldKeys: [String] {
         fields.filter { $0.type == .secret }.map(\.key)
     }
+
+    /// What a secret-typed value reads as wherever it is not deliberately revealed. One
+    /// constant so the list and the detail view can't drift apart, and a fixed length on
+    /// purpose — a mask sized to its value hands out the value's length for free.
+    static let secretMask = "••••••••••"
+
+    /// True when `key` names a secret-typed field of this group.
+    func isSecretField(_ key: String) -> Bool {
+        fields.contains { $0.key == key && $0.type == .secret }
+    }
+
+    /// One of an element's values as it may appear on screen: masked when the field that
+    /// holds it is secret-typed.
+    ///
+    /// The reveal toggle exists only in the detail view, one field and one click at a time.
+    /// The list had no equivalent and read `values[secondaryKey]` straight, and
+    /// `secondaryKey` is always the group's *first* field — so any group whose schema put a
+    /// secret first printed it in cleartext on every row, permanently, with nothing to hide
+    /// it again. The seeded groups all lead with a non-secret field, which is the only
+    /// reason it went unnoticed (vision.md §13.16).
+    ///
+    /// Nil when the element carries no such value at all, so callers can still tell "no
+    /// value" from "a value"; an empty secret stays empty rather than growing bullets, since
+    /// bullets over nothing claim a credential that was never set.
+    func displayValue(_ key: String, of element: NBElement) -> String? {
+        guard let value = element.values[key] else { return nil }
+        guard isSecretField(key), !value.isEmpty else { return value }
+        return Self.secretMask
+    }
 }
 
 extension Date {

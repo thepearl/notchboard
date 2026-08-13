@@ -423,11 +423,21 @@ final class NotchboardViewModel {
     var filteredElements: [NBElement] {
         let group = activeGroup
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Secret-typed values are deliberately out of the haystack (decided 2026-08-13,
+        // vision.md §13.16). Two reasons, and the first is a plain defect: row subtitles mask
+        // secrets, so a match on one produced a row with nothing on screen containing what
+        // was typed. The second is that a search field which confirms substrings of a
+        // password is a guessing oracle, on a panel that sits open next to a Simulator
+        // somebody else is watching.
+        //
+        // Keyed off the schema rather than off `values`, so a value whose field was deleted
+        // (type unknowable now) stays out too — it isn't rendered anywhere either.
+        let searchableKeys = group.fields.filter { $0.type != .secret }.map(\.key)
         let filtered = group.elements.filter { element in
             let envMatches = environmentFilter == .all || element.environments.contains(environmentFilter)
             guard envMatches else { return false }
             guard !query.isEmpty else { return true }
-            let haystack = ([element.name, element.note] + Array(element.values.values))
+            let haystack = ([element.name, element.note] + searchableKeys.compactMap { element.values[$0] })
                 .joined(separator: " ")
                 .lowercased()
             return haystack.contains(query)
@@ -436,15 +446,20 @@ final class NotchboardViewModel {
     }
 
     func secondaryText(for element: NBElement, in group: NBGroup) -> String {
+        // Every read goes through `displayValue`, on every branch: a row has no reveal
+        // toggle, so a secret-typed field can only ever render as bullets here — including
+        // through the special cases below, which name their fields directly and would
+        // otherwise be a second way past the mask.
+        //
         // Special-cased formats only apply when the schema actually carries those fields —
         // group IDs alone aren't a contract once users create their own groups.
-        if group.id == "promos", let pct = element.values["discount_pct"] {
-            return "\(pct)% off · exp \(element.values["expires"] ?? "—")"
+        if group.id == "promos", let pct = group.displayValue("discount_pct", of: element) {
+            return "\(pct)% off · exp \(group.displayValue("expires", of: element) ?? "—")"
         }
-        if group.id == "products", let sku = element.values["sku"] {
-            return "\(sku) · €\(element.values["price"] ?? "")"
+        if group.id == "products", let sku = group.displayValue("sku", of: element) {
+            return "\(sku) · €\(group.displayValue("price", of: element) ?? "")"
         }
-        return element.values[group.secondaryKey] ?? ""
+        return group.displayValue(group.secondaryKey, of: element) ?? ""
     }
 
     /// True when this claim belongs to the local user.

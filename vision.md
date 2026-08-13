@@ -1021,6 +1021,47 @@ plainly. The app also has an icon for the first time, which matters because the 
 first-run user must go — the Accessibility list and Login Items — are exactly where a generic
 placeholder undermines trust.
 
+### 13.16 The list was showing secrets (2026-08-13)
+
+The reveal toggle only ever existed in the detail view. The list had none, and it did not need
+one — until you notice what it renders. A row's subtitle came from `values[secondaryKey]`, and
+`secondaryKey` is always the group's **first** field (`CollectionStore` sets it from
+`fields.first` on every schema write). So any group whose schema led with a secret-typed field
+printed that secret in cleartext on every row of the list, permanently, with nothing anywhere to
+hide it again. Nobody hit it because all five seeded groups happen to lead with a username, a
+SKU or a base URL — the leak needed a user-defined group, which is exactly what the schema
+editor invites.
+
+`secondaryText`'s two group-id special cases (`"promos"`, `"products"` — the known debt) were a
+second route past it, since they name their fields directly instead of going through
+`secondaryKey`. Nothing stops a user calling a group "promos" and marking its discount secret.
+
+The fix is one accessor, `NBGroup.displayValue(_:of:)`, sitting next to `secretFieldKeys` — the
+existing single definition of what counts as a secret — and every read on every branch of
+`secondaryText` goes through it. `NBGroup.secretMask` is now the one mask constant, so the list
+and the detail view can't drift; it is a fixed ten bullets, because a mask sized to its value
+gives the value's length away. An *unset* secret still renders as nothing rather than as
+bullets: bullets over nothing claim a credential that was never entered.
+
+**Search no longer matches secret-typed values** (decided here, deliberately, having considered
+keeping it). Two reasons. The first is a plain defect that the masking created: with the
+subtitle masked, a row matching on its password appeared with nothing on screen containing what
+was typed, which reads as a bug and cannot be explained to the user without un-masking the
+thing. The second is that a field which confirms substrings of a secret is a guessing oracle,
+and this panel's whole premise is sitting open next to a Simulator that other people are looking
+at — pairing, demos, a screen share. Against that, the capability lost is one nobody uses: you
+look up a test account by who or what it is, not by pasting its password. The haystack is keyed
+off the schema now, not off `values`, so a value whose field was deleted (its type unknowable)
+stays out too; it isn't rendered anywhere either. If searching secrets is ever genuinely wanted,
+the honest shape is an explicit opt-in that also un-masks the matched row, not a silent match.
+
+Guarded by `SecretMaskingTests` (7 tests): the secret-first group, the mask's length invariance,
+both special-cased formats, the unset-secret case, search exclusion, and search still finding
+names, notes and non-secret values. Four of them fail against the old code.
+
+The group-id special-casing itself is untouched, and still the debt CLAUDE.md records — it is
+leak-safe now, not fixed.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between
