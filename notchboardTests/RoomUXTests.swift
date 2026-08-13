@@ -136,6 +136,60 @@ struct EffectivelyFreeTests {
     }
 }
 
+@Suite("Renaming yourself", .serialized)
+struct SelfRenameTests {
+
+    /// The view model half of the rename path: `selfName` had two other copies (the engine's
+    /// and each live session's) that nothing wrote, so the room kept the launch-time name.
+    /// The onboarding field's `.onChange` calls this method, so this is the last testable
+    /// link in that chain.
+    ///
+    /// Polled, not slept on: the room push is debounced, and the whole suite is main-actor
+    /// isolated, so a heavy neighbour can push a fixed deadline past the wire.
+    @Test("The view model pushes a new display name into the engine and its live sessions")
+    func viewModelPushesIntoTheRoom() async {
+        SnapshotStore.directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nb-rename-\(UUID().uuidString)", isDirectory: true)
+        SnapshotStore.deviceKeyOverride = SymmetricKey(data: Data(repeating: 3, count: 32))
+        let broker = LoopbackBroker()
+        let key = SymmetricKey(data: Data(repeating: 5, count: 32))
+
+        let vm = NotchboardViewModel()
+        let engine = SyncEngine(store: vm.store, selfMemberID: vm.selfMemberID, selfName: "Ana") { _, _ in
+            broker.makeTransport()
+        }
+        vm.syncEngine = engine
+        engine.joinRoom(NBRoomConfig(brokerURL: "mqtt://localhost:1883", room: "rename"),
+                        password: "", collectionID: vm.activeCollectionID, preDerivedKey: key)
+        broker.pump()
+        let session = engine.session(for: vm.activeCollectionID)
+
+        // Typing: the local copy tracks every keystroke, the room hears one name.
+        vm.updateSelfName("Ana R")
+        vm.updateSelfName("Ana Rose")
+        #expect(vm.selfName == "Ana Rose", "the panel's copy is immediate")
+        #expect(session?.selfName == "Ana", "still debounced — mid-word publishes are the thing to avoid")
+
+        let deadline = Date().addingTimeInterval(10)
+        while engine.selfName != "Ana Rose" && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+
+        #expect(engine.selfName == "Ana Rose")
+        #expect(session?.selfName == "Ana Rose", "the live session, not only the engine that built it")
+        #expect(vm.selfClaimLabel == "ana", "the local label still uses the first name only")
+        withExtendedLifetime(engine) {}
+    }
+
+    @Test("A view model with no room renames without needing one")
+    func roomlessRenameIsHarmless() {
+        let vm = NotchboardViewModel()
+        vm.updateSelfName("Sam")
+        #expect(vm.selfName == "Sam")
+        #expect(vm.selfClaimLabel == "sam")
+    }
+}
+
 @Suite("Room address in exports")
 struct RoomTransferTests {
 

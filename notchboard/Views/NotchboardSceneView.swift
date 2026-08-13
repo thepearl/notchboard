@@ -74,8 +74,9 @@ struct NotchboardSceneView: View {
         .onChange(of: onboarding.isPresented) { persist() }
         .onChange(of: onboarding.name) {
             // The onboarding name is the claim label (vision.md §14.2) — keep the view
-            // model's copy in step so claims made right after typing it are labelled.
-            viewModel.selfName = onboarding.name
+            // model's copy in step so claims made right after typing it are labelled, and
+            // let it reach any live room so teammates aren't left on the old name.
+            viewModel.updateSelfName(onboarding.name)
             persist()
         }
         // Deliberately NOT observing the tracker here: its properties are rewritten by a

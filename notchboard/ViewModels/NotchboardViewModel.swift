@@ -60,7 +60,12 @@ final class NotchboardViewModel {
     /// Stable local member id: what this user's claims are attributed to.
     var selfMemberID: String = UUID().uuidString
     /// The onboarding display name. Labels this user's claims; empty falls back to "you".
-    var selfName: String = ""
+    /// Settable only through `updateSelfName` (and `restore`), because a bare assignment
+    /// moves the panel's copy and leaves the room publishing the old one.
+    private(set) var selfName: String = ""
+    /// Debounces the room push in `updateSelfName`.
+    @ObservationIgnored private var pendingSelfNamePush: Task<Void, Never>?
+    private static let selfNamePushDebounce: Duration = .milliseconds(500)
 
     // MARK: Sync (vision.md §14.2)
     /// The room coordinator, when the app runs for real. Weak: AppDelegate owns it, and
@@ -465,6 +470,24 @@ final class NotchboardViewModel {
     /// True when this claim belongs to the local user.
     func isMine(_ claim: NBClaim) -> Bool {
         claim.who == selfMemberID
+    }
+
+    /// The one way the display name changes. Two copies have to move: this one, which the
+    /// panel renders, and the engine's, which every claim and presence publish carries —
+    /// writing `selfName` alone left teammates on the launch-time name until relaunch.
+    ///
+    /// The room half is debounced exactly like AppStateStore's save, and for the same
+    /// reason: the name field is bound per keystroke, and one presence publish per
+    /// character would have the room watch a name being typed.
+    func updateSelfName(_ name: String) {
+        guard name != selfName else { return }
+        selfName = name
+        pendingSelfNamePush?.cancel()
+        pendingSelfNamePush = Task { [weak self] in
+            try? await Task.sleep(for: Self.selfNamePushDebounce)
+            guard !Task.isCancelled, let self else { return }
+            syncEngine?.updateSelfName(selfName)
+        }
     }
 
     /// How the local user's marks are labelled: the onboarding first name, lowercase to

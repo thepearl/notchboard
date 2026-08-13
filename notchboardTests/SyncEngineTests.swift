@@ -243,6 +243,68 @@ struct SyncEngineTests {
         #expect(c.workspace.members["member-a"]?.name == "ana", "the claimant arrived as a member — the relaunch-wipe trap")
     }
 
+    @Test("Renaming yourself reaches the room now, not at the next relaunch")
+    func renamePublishesFreshPresence() throws {
+        let broker = LoopbackBroker()
+        let (a, b) = seededPair(broker)
+        a.store.setClaim(NBClaim(who: "member-a"), elementID: "e1", group: "users",
+                         collection: a.collectionID, claimantName: "ana")
+        broker.pump()
+        #expect(b.workspace.members["member-a"]?.name == "ana")
+
+        a.engine.updateSelfName("ana rose")
+        broker.pump()
+
+        #expect(a.engine.selfName == "ana rose")
+        #expect(a.session.selfName == "ana rose", "the live session, not only the engine that built it")
+        #expect(b.workspace.members["member-a"]?.name == "ana rose",
+                "presence carried it — members[…] is what renders a name")
+        #expect(b.session.onlineMemberIDs == ["member-a"], "still online through the rename")
+        #expect(b.element("e1")?.claimedBy?.who == "member-a", "the mark itself is untouched")
+
+        // The will is refreshed too, so an ungraceful drop after a rename doesn't announce
+        // the old name. (MQTT hands the will over at CONNECT, so this lands on reconnect.)
+        let will = try #require(a.transport.lastWill)
+        let codec = SyncCodec(key: roomKey)
+        let willPayload = try codec.open(SyncPresencePayload.self, from: will.payload)
+        #expect(willPayload.name == "ana rose")
+        #expect(willPayload.state == .offline)
+
+        // A later claim naturally carries the new name — nothing special about the path.
+        a.store.setClaim(NBClaim(who: "member-a"), elementID: "e2", group: "users",
+                         collection: a.collectionID, claimantName: "ana rose")
+        broker.pump()
+        #expect(b.workspace.members["member-a"]?.name == "ana rose")
+    }
+
+    /// Why the rename republishes presence and NOT every claim this member holds: the
+    /// retained claim keeps the old name on the broker, and it still doesn't matter,
+    /// because the ordered replay applies presence after claims.
+    @Test("A late joiner reads the new name over the old one the retained claim still holds")
+    func renameOutranksTheRetainedClaimForLateJoiners() throws {
+        let broker = LoopbackBroker()
+        let (a, _) = seededPair(broker)
+        a.store.setClaim(NBClaim(who: "member-a"), elementID: "e1", group: "users",
+                         collection: a.collectionID, claimantName: "ana")
+        broker.pump()
+
+        a.engine.updateSelfName("ana rose")
+        broker.pump()
+
+        let codec = SyncCodec(key: roomKey)
+        let retainedClaim = try #require(broker.retained[SyncTopic.claim(elementID: "e1").string(room: "team")])
+        #expect(try codec.open(SyncClaimPayload.self, from: retainedClaim.payload).name == "ana",
+                "the claim was deliberately not republished")
+
+        let c = Peer(broker: broker, memberID: "member-c", name: "cam", workspace: emptyWorkspace())
+        c.join()
+        broker.pump()
+
+        #expect(c.element("e1")?.claimedBy?.who == "member-a")
+        #expect(c.workspace.members["member-a"]?.name == "ana rose",
+                "presence is ranked after claims in the ordered apply, so it wins")
+    }
+
     @Test("A converged room is quiet: one edit costs exactly one publish, no echoes")
     func noEchoLoops() {
         let broker = LoopbackBroker()
