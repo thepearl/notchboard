@@ -16,12 +16,6 @@ it local.
   <a href="https://github.com/thepearl/notchboard/actions/workflows/ci.yml">
     <img src="https://github.com/thepearl/notchboard/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI" />
   </a>
-  <a href="https://github.com/thepearl/notchboard/stargazers">
-    <img src="https://img.shields.io/github/stars/thepearl/notchboard" alt="Stars" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/thepearl/notchboard" alt="Apache 2.0" />
-  </a>
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey" alt="macOS 14+" />
   <img src="https://img.shields.io/badge/Swift-5.0-orange?logo=swift&logoColor=white" alt="Swift 5" />
   <a href="USAGE.md">
