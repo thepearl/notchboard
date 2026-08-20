@@ -16,9 +16,19 @@ name: Release
 #
 # Fork pull requests never see these secrets (GitHub withholds them by design), and the
 # workflow only runs on tags, which only maintainers can push.
+#
+# Running it from the Actions tab (workflow_dispatch) is a DRY RUN: it builds, signs,
+# notarises and staples for real, verifies write access to the tap without pushing, and
+# uploads the finished zip as a workflow artifact instead of publishing anything.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version label for the dry-run artefact name
+        default: 0.0.0-dryrun
+        required: true
 
 jobs:
   release:
@@ -62,7 +72,11 @@ jobs:
       - name: Build and stage
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
           scripts/release.sh --version "$version" --clean
 
@@ -108,6 +122,8 @@ jobs:
 
       # Bumped before the release exists so the pin never lags the download it describes.
       # The in-repo Casks/notchboard.rb copy is documentation and is not touched here.
+      # On a dry run this only proves the token can push (git push --dry-run authenticates
+      # and checks permissions without moving any ref).
       - name: Bump the tap
         env:
           GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
@@ -115,18 +131,34 @@ jobs:
           set -euo pipefail
           git clone "https://x-access-token:${GH_TOKEN}@github.com/thepearl/homebrew-tap.git" tap
           cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git commit --allow-empty -m "dry run, never pushed"
+            git push --dry-run origin HEAD:master
+            echo "Tap write access verified, nothing pushed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           sed -i '' -e "s/^  version \".*\"/  version \"${VERSION}\"/" \
                     -e "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/notchboard.rb
           git diff --quiet && { echo "Tap already pins ${VERSION}."; exit 0; }
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -am "notchboard ${VERSION}"
           git push origin HEAD:master
 
       - name: Publish the release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release create "v${VERSION}" "build/release/notchboard-${VERSION}.zip" \
             --title "v${VERSION}" --generate-notes
+
+      # The dry run's product, downloadable from the run page to check the app launches
+      # cleanly on another Mac (no Gatekeeper complaint means signing and stapling worked).
+      - name: Upload the dry-run artefact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: notchboard-${{ env.VERSION }}
+          path: build/release/notchboard-${{ env.VERSION }}.zip
