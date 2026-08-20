@@ -111,9 +111,38 @@ member, it takes a few minutes per submission, and no human reviews the app. It 
 Store review. Notchboard runs unsandboxed with hardened runtime on, which notarisation
 accepts.
 
+## The automated path
+
+Since 2026-08-20 the checklist below is executed by CI. Pushing a version tag runs
+`.github/workflows/release.yml`:
+
+```bash
+git tag v1.1
+git push origin v1.1
+```
+
+That one push builds, signs, notarises, staples, bumps the tap and publishes the GitHub
+release, in that order. The tap is bumped before the release is published so the pin never
+lags the download it describes, and the separate "Cask checksum" workflow re-verifies the
+pin against the published asset as an independent check.
+
+The workflow needs six repository secrets, listed in its header comment: the Developer ID
+certificate as a base64 `.p12` with its password, the App Store Connect API key (key id,
+issuer id and the `.p8` contents) for notarytool, and a fine-grained token with write
+access to the tap. When that token expires, releases fail at the tap step until it is
+replaced.
+
+Running the same workflow from the Actions tab is a dry run. It builds, signs and
+notarises for real, verifies write access to the tap without pushing, and uploads the
+finished zip as a workflow artifact instead of publishing anything. Use it after rotating
+any of the secrets. The pipeline was first proven end to end this way on 2026-08-20.
+
 ## Release checklist
 
-Steps 1 to 3 need nothing but Xcode. Steps 4 to 6 need the paid account.
+CI executes steps 3 to 9 on a tag push, and they are kept spelled out here because they
+are what the workflow does, and because they are the fallback when CI is unavailable.
+Steps 1, 2 and 10 stay yours either way. Steps 4 to 6 need the paid account when run by
+hand.
 
 1. Decide the version. `MARKETING_VERSION` in the project is the source of truth, and
    `scripts/release.sh` reads it unless you pass `--version`.
