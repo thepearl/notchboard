@@ -297,7 +297,7 @@ private struct FieldRow: View {
                 .font(NBFont.mono(10.5, weight: .medium))
                 .foregroundStyle(NBColor.textMuted)
                 .frame(width: 72, alignment: .leading)
-            Text(isSecret && !isRevealed ? "••••••••••" : value)
+            Text(isSecret && !isRevealed ? NBGroup.secretMask : value)
                 .font(NBFont.mono(10.5))
                 .foregroundStyle(NBColor.textFieldValue)
                 .lineLimit(1)
