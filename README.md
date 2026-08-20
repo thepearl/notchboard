@@ -1,5 +1,7 @@
 # Notchboard - Shared test accounts, docked to your iOS Simulator
 
+### 📚 [Read the documentation at notchboard.gitbook.io/notchboard](https://notchboard.gitbook.io/notchboard)
+
 Notchboard is a macOS menu-bar app that keeps your team's working test logins next to the simulator
 you are already looking at. It attaches a slim notch to the edge of the Simulator window, follows
 that window as it moves, and opens into a searchable catalogue on a click. Pick an account, copy it
@@ -18,8 +20,8 @@ it local.
   </a>
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey" alt="macOS 14+" />
   <img src="https://img.shields.io/badge/Swift-5.0-orange?logo=swift&logoColor=white" alt="Swift 5" />
-  <a href="USAGE.md">
-    <img src="https://img.shields.io/badge/documentation-usage%20guide-blue" alt="Usage guide" />
+  <a href="https://notchboard.gitbook.io/notchboard">
+    <img src="https://img.shields.io/badge/documentation-gitbook-blue" alt="Documentation" />
   </a>
 </h4>
 
@@ -28,8 +30,8 @@ it local.
 </p>
 
 <p align="center">
-  <img src="docs/assets/notchboard-docked.jpg" width="880"
-       alt="The Notchboard panel docked to the right edge of an iOS Simulator window. The panel lists a test account under a users tab, alongside gift cards and coffees tabs, while the simulator shows the Brewly demo app's login screen." />
+  <img src="docs/assets/panel-docked-brewly.jpg" width="880"
+       alt="The Notchboard panel docked to the right edge of an iOS Simulator window running the Brewly demo app's login screen. The panel lists an Espresso test account under a users tab, with DEV and STG environment chips." />
   <br />
   <sub>The panel docked to the Simulator window. That account's login is one click away, through the deeplink shown at the foot of the demo app.</sub>
 </p>

@@ -11,6 +11,8 @@ Notchboard is a macOS menu-bar app that keeps your team's working test logins ne
 
 Pick an account, copy it or fire it straight into the booted app as a deeplink, and mark it in use so nobody logs in behind you.
 
+<figure><img src="assets/panel-docked-brewly.jpg" alt="The panel docked beside a simulator running the sample app's login screen"><figcaption>The panel docked to a simulator, one click from logging that account in.</figcaption></figure>
+
 Install it with Homebrew.
 
 ```bash
