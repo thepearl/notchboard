@@ -178,9 +178,19 @@ notarise before uploading anything anyone else will install.
 STEP 1: sign with Developer ID (replace the identity)
   Find yours with: security find-identity -v -p codesigning
 
-  codesign --force --deep --options runtime --timestamp \\
+  Sign inside-out: nested binaries first, the bundle last. The Swift compatibility
+  dylibs in Contents/Frameworks keep their ad-hoc signature otherwise, and the notary
+  service rejects the whole archive over them. (--deep also covers them but Apple has
+  deprecated it.)
+
+  for dylib in "${staged_app}"/Contents/Frameworks/*.dylib; do
+    codesign --force --options runtime --timestamp \\
+      --sign "Developer ID Application: YOUR NAME (TEAMID)" "\$dylib"
+  done
+  codesign --force --options runtime --timestamp \\
     --sign "Developer ID Application: YOUR NAME (TEAMID)" \\
     "${staged_app}"
+  codesign --verify --deep --strict "${staged_app}"
 
   Then re-zip, because the signature has to be inside the archive:
   rm -f "${zip_path}"

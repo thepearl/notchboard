@@ -17,15 +17,15 @@
 # Keychain items, and deleting the login keychain would take everything else with it).
 # They are listed under the zap stanza with the commands that clear them by hand.
 #
-# The sha256 below is a PLACEHOLDER, not a real checksum: there is no release yet. Replace
-# it with the value scripts/release.sh prints for the uploaded zip. Homebrew checks the
-# download against that line, so a stale value fails the install loudly instead of
-# installing the wrong build. It cannot carry a comment of its own, because rubocop's
-# Cask/StanzaGrouping cop treats a comment as a group break and then demands blank lines
-# that the same cop rejects.
+# The sha256 is the checksum of the final zip attached to the GitHub release: signed,
+# notarised, stapled, then zipped one last time (every re-zip changes it, so only the
+# last one counts). Homebrew checks the download against that line, so a stale value
+# fails the install loudly instead of installing the wrong build. It cannot carry a
+# comment of its own, because rubocop's Cask/StanzaGrouping cop treats a comment as a
+# group break and then demands blank lines that the same cop rejects.
 cask "notchboard" do
   version "1.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "08b20ab802fb8cd5e83fe05b7c2481ded051b3b4f64772bc5e1c4d1102ab873d"
 
   url "https://github.com/thepearl/notchboard/releases/download/v#{version}/notchboard-#{version}.zip"
   name "Notchboard"
