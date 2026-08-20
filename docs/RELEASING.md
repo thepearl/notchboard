@@ -1,3 +1,8 @@
+---
+icon: box-open
+description: How a release is built, signed, notarised and shipped to the tap.
+---
+
 # Releasing Notchboard
 
 How a build gets from this repo to someone else's Mac, what `brew install` really costs,

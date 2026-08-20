@@ -1,0 +1,117 @@
+---
+icon: code-pull-request
+description: Building, testing, and what a pull request needs to pass.
+---
+
+# Contributing
+
+Contributions are welcome, in code, docs, bug reports and ideas. This page covers building, testing, and what a pull request needs to pass.
+
+The repository is at [github.com/thepearl/notchboard](https://github.com/thepearl/notchboard).
+
+## Getting set up
+
+```bash
+git clone https://github.com/thepearl/notchboard.git
+cd notchboard
+open notchboard.xcodeproj
+```
+
+You need Xcode 26 or later. No Apple developer account is needed, because signing is ad-hoc with an empty development team in every configuration.
+
+{% hint style="warning" %}
+Do not commit a team id back in. Xcode's Signing & Capabilities tab writes yours into `project.pbxproj`, where it shows up in `git status` and in any patch you send. Override the settings on the command line or in an `.xcconfig` outside the repository instead.
+{% endhint %}
+
+## Building and testing
+
+{% tabs %}
+{% tab title="xcodebuild" %}
+```bash
+xcodebuild -project notchboard.xcodeproj -scheme notchboard -configuration Debug build
+```
+
+```bash
+xcodebuild -project notchboard.xcodeproj -scheme notchboard -destination 'platform=macOS' test
+```
+{% endtab %}
+
+{% tab title="fastlane" %}
+This is what CI runs.
+
+```bash
+bundle install && bundle exec fastlane test
+```
+{% endtab %}
+{% endtabs %}
+
+Three suites need something your machine may not have, and they skip rather than fail.
+
+| Suite                          | Needs                                                  |
+| ------------------------------ | ------------------------------------------------------ |
+| `MosquittoIntegrationTests`    | An MQTT broker on `localhost:1883`                     |
+| `PeerHarnessTests`             | The same broker                                        |
+| `SimctlBridgeIntegrationTests` | A booted simulator with the `SampleApp` demo installed |
+
+{% hint style="danger" %}
+A green run on a bare machine does not cover the room or the deeplink bridge. Boot both before trusting one.
+{% endhint %}
+
+```bash
+brew install mosquitto && "$(brew --prefix)"/opt/mosquitto/sbin/mosquitto -p 1883
+```
+
+```bash
+xcrun simctl list devices    # pick a device name your runtimes actually have
+xcrun simctl boot 'iPhone 16'
+open -a Simulator
+```
+
+## Writing tests
+
+Tests use Swift Testing, never XCTest. Import `Testing`, write `@Test` functions and `#expect` assertions.
+
+Skips go on the suite as an `.enabled(if:)` trait, never as a `try #require` inside a test body. Swift Testing has no in-body skip, so a `#require` gate records a failed expectation and turns a clean clone's first test run red.
+
+Timing-sensitive tests poll rather than sleep for a fixed interval. The suite is main-actor isolated, so a heavy neighbour can delay a continuation past any hard-coded deadline, and the test then fails only in full runs.
+
+## Before opening a pull request
+
+Read `CLAUDE.md` first if you are changing anything structural. It lists the constraints that are load-bearing, each with the bug that produced it. The App Sandbox stays off, the panel stays non-activating, the global chords stay on Carbon, and nothing animates in the panel at rest. Those are not preferences.
+
+Then check that:
+
+* The build is clean, with no new warnings in app sources.
+* The full suite passes, including the environment-gated suites if your change touches sync or the deeplink bridge.
+* `swiftlint lint` reports no new violations. The existing ones are advisory in CI until they are burned down, so do not add to the pile.
+* `vision.md` section 13 is updated if the change alters what the app does. That section is the running implementation log, and it is how the next person learns why something is the way it is.
+
+Commit messages are `<type>: <description>`, where type is one of feat, fix, refactor, docs, test, chore, perf or ci.
+
+## House rules for user-facing copy
+
+Three of them, each from a real complaint.
+
+The word `claim` never appears in front of a user. The interface says "in use", "used by" and "use + copy". Internal identifiers keep their names.
+
+Explain the consequence, not the mechanism. A settings footer or a dialog preamble is one or two lines. How a feature works internally belongs in `vision.md`.
+
+Action labels carry no trailing ellipsis.
+
+## Using an AI assistant
+
+Encouraged, not merely tolerated, and especially on bug fixes. Large parts of Notchboard were built with one, and `CLAUDE.md` exists precisely so an agent arrives knowing which decisions are load-bearing.
+
+A bug comes with a reproduction and a failing test, so the output is checkable against something concrete rather than against taste.
+
+The policy is two conditions, both in `ABOUT_AI_USAGE.md`. The first is that the change has to match the vision, which means the assistant has read `vision.md` before proposing anything.
+
+## Reporting something
+
+Open an [issue](https://github.com/thepearl/notchboard/issues). For anything about the room, say which broker you were on and whether it was over TLS, since most room behaviour depends on both.
+
+{% hint style="danger" %}
+Do not put real credentials in an issue, in a test collection you attach, or in a room on a public broker. The app is a place to keep shared test accounts, and the word test in that sentence is doing real work.
+{% endhint %}
+
+Please also read the code of conduct in the repository.

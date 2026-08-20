@@ -1,3 +1,8 @@
+---
+icon: clipboard-check
+description: The manual QA plan a pair of humans runs against a live team room.
+---
+
 # Notchboard team room — QA test plan
 
 First multi-human test of the sync room (vision.md §13.10). Everything below has passed
