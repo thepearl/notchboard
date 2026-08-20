@@ -39,6 +39,10 @@ Look for the half-filled square in the menu bar. There is no Dock icon.
 
 Four steps in their own window: a welcome screen, your name, your starting point, and the Accessibility permission.
 
+<figure><img src="../assets/onboarding-welcome.png" alt="The setup window's welcome step"><figcaption>Setup runs in its own small window.</figcaption></figure>
+
+<figure><img src="../assets/onboarding-name.png" alt="The setup step asking for your name"><figcaption>The name you give here labels every element you mark in use.</figcaption></figure>
+
 For a first look, pick the sample catalogue. It comes with 4 groups and 20 elements to poke at.
 {% endstep %}
 
@@ -60,6 +64,8 @@ If the toggle will not stick, which happens on some managed Macs, click **contin
 Start Simulator.app, then open the panel from the menu bar.
 
 You should see a slim notch attached to the edge of the Simulator window, following it as you drag that window around. Click the notch and the catalogue opens.
+
+<figure><img src="../assets/panel-docked-brewly.jpg" alt="The expanded panel docked beside a simulator running the sample app"><figcaption>The expanded panel docked to a simulator, here running the repository's sample app.</figcaption></figure>
 {% endstep %}
 {% endstepper %}
 

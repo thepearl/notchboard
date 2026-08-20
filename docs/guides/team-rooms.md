@@ -116,6 +116,10 @@ Three doors, all the same flow. Paste the invite, type the room password.
 * Menu bar → **Join Room with Invite**
 * Onboarding → **join a team room** as your starting point
 
+<figure><img src="../assets/join-room-dialog.png" alt="The join dialog asking for an invite and the room password"><figcaption>The join dialog takes the pasted invite and the room password, nothing else.</figcaption></figure>
+
+<figure><img src="../assets/onboarding-start-catalogue.png" alt="Onboarding's starting point step with join a team room selected"><figcaption>Joining is also a starting point during setup, for a Mac with nothing to keep.</figcaption></figure>
+
 The broker's retained messages then hand the new joiner the entire catalogue, with no history protocol of our own.
 {% endstep %}
 {% endstepper %}

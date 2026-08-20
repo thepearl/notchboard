@@ -32,6 +32,8 @@ A group is a table with a schema. The sample catalogue ships with several. A fre
 Group tabs run along the top of the list, each with its element count. The ✎ button beside them opens the group editor, where you add fields, rename them, retype them and drag the ⋮⋮ handle to reorder.
 
 Renaming or retyping a field keeps existing values, because fields are identified by a stable id rather than by their label.
+
+<figure><img src="../assets/new-group-form.png" alt="The new group form, a name and a list of fields"><figcaption>A group is its schema, a name plus the fields every element shares.</figcaption></figure>
 {% endstep %}
 
 {% step %}
@@ -42,6 +44,8 @@ Press ⌃N anywhere in Xcode, Simulator or Notchboard, and the add-element form 
 Pick the group, and its schema decides which fields you get. Fill them in. Validation runs at save rather than as you type, because values also arrive through imports and hand-edited files.
 
 Tick the environments the account exists in. An element carries a set, not one value, because the same test account is usually seeded into dev and staging with identical credentials.
+
+<figure><img src="../assets/new-user-form.png" alt="The add-element form for a users group"><figcaption>The group's schema decides the fields. The password field is typed secret, so lists mask it.</figcaption></figure>
 
 {% hint style="warning" %}
 Tick `PRD` alongside anything else and Notchboard asks once, at save, whether you meant it. A production credential reachable from a dev build is how production data ends up in a staging log.
