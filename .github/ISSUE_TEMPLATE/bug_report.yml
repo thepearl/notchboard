@@ -1,0 +1,62 @@
+name: Bug report
+description: Something is broken
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed
+      options:
+        - Homebrew cask
+        - Release zip
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: App version, macOS version, and Xcode version if you built from source.
+      placeholder: Notchboard 1.0, macOS 26.1
+    validations:
+      required: true
+  - type: dropdown
+    id: context
+    attributes:
+      label: What was on screen
+      description: Docking bugs depend on this.
+      options:
+        - Simulator running, panel docked
+        - Simulator running, panel undocked
+        - No simulator, panel undocked
+        - Not relevant
+  - type: dropdown
+    id: room
+    attributes:
+      label: Team room
+      options:
+        - No room, local only
+        - Room on a local mosquitto
+        - Room on a hosted broker (mqtts)
+        - Room over WebSocket (wss)
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, log lines, broker details. Never paste real credentials, an invite line, or a room password.

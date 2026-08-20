@@ -1,0 +1,25 @@
+name: Feature request
+description: Something Notchboard should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and where the app gets in the way. The problem travels better than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+  - type: markdown
+    attributes:
+      value: |
+        Worth a skim first: [ROADMAP.md](https://github.com/thepearl/notchboard/blob/master/ROADMAP.md) lists what is planned and what is deliberately out of scope, and the README's "What it is not" section explains the edges.

@@ -1,0 +1,43 @@
+name: Cask checksum
+
+# The tap's cask pins the sha256 of the release zip, and a stale pin fails every
+# `brew install` loudly on a user's machine. This job cross-checks the pin in
+# thepearl/homebrew-tap against the asset actually attached to the latest GitHub
+# release, so a forgotten tap bump surfaces here first.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify tap pin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare the tap cask against the latest release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo thepearl/notchboard --json tagName -q .tagName)
+          version="${tag#v}"
+          gh release download "$tag" --repo thepearl/notchboard \
+            --pattern "notchboard-${version}.zip" --output release.zip
+          actual=$(sha256sum release.zip | cut -d' ' -f1)
+
+          cask=$(curl -fsSL "https://raw.githubusercontent.com/thepearl/homebrew-tap/master/Casks/notchboard.rb")
+          pinned_version=$(printf '%s\n' "$cask" | sed -n 's/^ *version "\(.*\)"$/\1/p')
+          pinned_sha=$(printf '%s\n' "$cask" | sed -n 's/^ *sha256 "\(.*\)"$/\1/p')
+
+          echo "release: ${version} ${actual}"
+          echo "tap:     ${pinned_version} ${pinned_sha}"
+
+          if [ "$version" != "$pinned_version" ]; then
+            echo "::error::The tap still pins version ${pinned_version}, the latest release is ${version}. Bump Casks/notchboard.rb in thepearl/homebrew-tap."
+            exit 1
+          fi
+          if [ "$actual" != "$pinned_sha" ]; then
+            echo "::error::The tap's sha256 does not match the zip attached to ${tag}. Every re-zip changes the checksum, so only the uploaded file counts."
+            exit 1
+          fi
+          echo "Tap pin matches the release."

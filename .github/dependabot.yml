@@ -1,0 +1,13 @@
+# The Swift ecosystem is deliberately absent: Dependabot reads Package.swift manifests,
+# and this project declares its one package dependency (mqtt-nio) inside the Xcode
+# project, so that pin stays manual.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: monthly
