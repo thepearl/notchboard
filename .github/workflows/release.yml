@@ -1,0 +1,132 @@
+name: Release
+
+# Pushing a v* tag builds, signs, notarises, staples and publishes a release, then bumps
+# the tap. It automates exactly the by-hand steps scripts/release.sh prints (see
+# docs/RELEASING.md for why each one exists). The tap is bumped BEFORE the release is
+# published, so the "Cask checksum" workflow that fires on publication finds a matching
+# pin instead of a race.
+#
+# Secrets this needs, all set with `gh secret set`:
+#   MACOS_CERTIFICATE           base64 of the Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD  the .p12's password
+#   ASC_KEY_ID                  App Store Connect API key id
+#   ASC_ISSUER_ID               App Store Connect issuer id
+#   ASC_KEY_P8                  contents of the AuthKey_*.p8
+#   TAP_GITHUB_TOKEN            fine-grained PAT, contents read/write on thepearl/homebrew-tap
+#
+# Fork pull requests never see these secrets (GitHub withholds them by design), and the
+# workflow only runs on tags, which only maintainers can push.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: Build, notarise, publish
+    # Same pin as ci.yml, and load-bearing for the same reason: the project needs Xcode 26.
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # A throwaway keychain, unlocked for this job only. The identity name is read from
+      # the certificate rather than hardcoded, so a renewed certificate needs no edit here.
+      - name: Import the signing certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" > /dev/null
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
+          if [ -z "$identity" ]; then
+            echo "::error::The imported certificate holds no Developer ID Application identity."
+            exit 1
+          fi
+          echo "IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build and stage
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          scripts/release.sh --version "$version" --clean
+
+      # Inside-out: the Swift compatibility dylibs first, the bundle last. Signing only
+      # the bundle leaves them ad-hoc signed and the notary service rejects the archive
+      # over them. (--deep also covers them but Apple has deprecated it.)
+      - name: Sign
+        run: |
+          set -euo pipefail
+          app="build/release/notchboard.app"
+          for dylib in "$app"/Contents/Frameworks/*.dylib; do
+            [ -e "$dylib" ] || continue
+            codesign --force --options runtime --timestamp --sign "$IDENTITY" "$dylib"
+          done
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$app"
+          codesign --verify --deep --strict "$app"
+
+      # Each re-zip is deliberate: the signature must be inside the archive that gets
+      # notarised, and the staple ticket must be inside the archive that gets shipped.
+      - name: Notarise and staple
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          app="build/release/notchboard.app"
+          zip="build/release/notchboard-${VERSION}.zip"
+          key_path="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$ASC_KEY_P8" > "$key_path"
+          rm -f "$zip"
+          ditto -c -k --keepParent "$app" "$zip"
+          xcrun notarytool submit "$zip" \
+            --key "$key_path" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait
+          rm -f "$key_path"
+          xcrun stapler staple "$app"
+          rm -f "$zip"
+          ditto -c -k --keepParent "$app" "$zip"
+          spctl --assess --type execute --verbose "$app"
+          sha="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+          echo "SHA256=$sha" >> "$GITHUB_ENV"
+          echo "notchboard-${VERSION}.zip sha256: $sha" >> "$GITHUB_STEP_SUMMARY"
+
+      # Bumped before the release exists so the pin never lags the download it describes.
+      # The in-repo Casks/notchboard.rb copy is documentation and is not touched here.
+      - name: Bump the tap
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/thepearl/homebrew-tap.git" tap
+          cd tap
+          sed -i '' -e "s/^  version \".*\"/  version \"${VERSION}\"/" \
+                    -e "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/notchboard.rb
+          git diff --quiet && { echo "Tap already pins ${VERSION}."; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "notchboard ${VERSION}"
+          git push origin HEAD:master
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" "build/release/notchboard-${VERSION}.zip" \
+            --title "v${VERSION}" --generate-notes
