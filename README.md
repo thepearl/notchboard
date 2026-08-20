@@ -37,7 +37,28 @@ it local.
 <!-- A screen recording of the notch following the window as it moves belongs here. Drag the file
      into a GitHub issue or release, then paste the user-attachments URL on its own line. -->
 
+## Table of contents
 
+- [Main use cases](#main-use-cases)
+- [Main features](#main-features)
+  - [Platform support](#-platform-support)
+- [Every action, and where it lives](#-every-action-and-where-it-lives)
+- [Architecture](#️-architecture)
+- [Documentation](#-documentation)
+- [Prerequisites](#prerequisites)
+- [Installation and configuration](#installation-and-configuration)
+  - [Verify it works](#-verify-it-works)
+  - [Team room mode](#team-room-mode)
+  - [How to use](#️-how-to-use)
+  - [Example workflows](#-example-workflows)
+- [Running and configuration](#running-and-configuration)
+  - [Settings](#settings)
+  - [Where your data lives](#where-your-data-lives)
+  - [Security and privacy](#security-and-privacy)
+- [What it is not](#-what-it-is-not)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [Licence](#licence)
 
 ### Main use cases
 
@@ -168,6 +189,8 @@ is missing, or Simulator is not running, the menu bar still opens the panel as a
 window. That is the supported fallback, not a broken state.
 
 ## 📚 Documentation
+
+The hosted documentation lives at [notchboard.gitbook.io/notchboard](https://notchboard.gitbook.io/notchboard). Its Documentation section is generated from the `docs/` folder of this repo on every push to master, so the two never drift. The in-repo pages:
 
 | Page | What is in it |
 |---|---|
