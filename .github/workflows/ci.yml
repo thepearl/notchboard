@@ -26,7 +26,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Printed rather than assumed. If a future image bumps its default Xcode or Ruby, this is
       # the line that says so, instead of a compile error a hundred lines down.
@@ -51,7 +51,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Advisory. --lenient keeps warnings from failing the job until the existing ones are
       # burned down; drop it to make a warning fail.
