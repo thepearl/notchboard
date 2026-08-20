@@ -17,17 +17,17 @@ rooms over MQTT joined with one pasted invite and one password.
 The room has passed a two-human test over a public broker on TLS. CI builds and tests every push to
 master and every pull request against it.
 
+Since 2026-08-20, v1.0 is a notarised download on the
+[releases page](https://github.com/thepearl/notchboard/releases) and installs with
+`brew install --cask thepearl/tap/notchboard`. The Developer ID signature also means the
+Accessibility grant survives updates, which self-built ad-hoc copies never managed.
+
 ## Next
 
-**A download that opens on a double click.** Today the only way to get the app is to build it.
-A downloaded copy that is not notarised is refused by macOS with a message that reads like a corrupt
-file rather than a policy decision. Fixing that needs a Developer ID certificate and Apple's
-notarisation service. The full reasoning and the exact steps are in
-[docs/RELEASING.md](docs/RELEASING.md).
-
-**A Homebrew cask.** [Casks/notchboard.rb](Casks/notchboard.rb) is written and waiting on the
-release above. It installs from a personal tap. A bare `brew install notchboard` needs acceptance
-into homebrew-cask, which has notability criteria this project does not meet yet.
+**A bare `brew install notchboard`.** The cask lives in a personal tap because homebrew-cask has
+notability criteria (75 stars, or 30 forks or watchers, higher when the author submits it). The
+repository only went public with v1.0, so the counters start from zero. Nothing to build here,
+just numbers to reach, then a submission.
 
 **A soft-delete trash.** Deletions are permanent and propagate to the room immediately. Snapshots
 cover the accident, but a restore brings back a whole collection rather than one row.

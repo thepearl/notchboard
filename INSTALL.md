@@ -1,15 +1,35 @@
 # Installing notchboard
 
 Notchboard is a macOS menu-bar agent that docks a catalogue of test accounts and fixtures to the
-iOS Simulator window. This page takes you from a fresh clone to a panel docked beside a running
-simulator.
+iOS Simulator window. This page takes you from nothing to a panel docked beside a running
+simulator, whether you install a release or build from source.
 
-There is no prebuilt download yet. Building from source is the only way to get the app today.
-The reason is signing and notarisation, not effort: a zip that Homebrew or a browser downloads
-carries the quarantine attribute, and macOS refuses a quarantined app that has no Developer ID
-signature. The full reasoning and the release process are in [docs/RELEASING.md](docs/RELEASING.md).
+## Installing a release
 
-## Requirements
+The released app installs from a personal tap:
+
+```bash
+brew install --cask thepearl/tap/notchboard
+```
+
+Or without Homebrew: download `notchboard-<version>.zip` from the
+[latest release](https://github.com/thepearl/notchboard/releases/latest), unzip it, and drag
+`notchboard.app` into Applications.
+
+Either way the build is signed with a Developer ID certificate, notarised by Apple and stapled, so
+the first launch is a normal one: macOS asks its standard once-only confirmation for an app from
+the internet, and nothing worse. Requirements are macOS 14.0 (Sonoma) or later and, for the docked
+presentation, Xcode's Simulator.app with at least one iOS runtime. If that is you, skip ahead to
+[First run](#first-run).
+
+Updates keep the Accessibility grant, because every release carries the same Developer ID identity.
+The self-built copies the rest of this page describes are the ones that lose it on every rebuild.
+
+A bare `brew install notchboard` needs acceptance into homebrew-cask, whose notability criteria
+this project does not meet yet. [docs/RELEASING.md](docs/RELEASING.md) has the detail, along with
+how a release is produced.
+
+## Requirements for building from source
 
 macOS 14.0 (Sonoma) or later. `MACOSX_DEPLOYMENT_TARGET` is 14.0 in every build configuration.
 
@@ -258,7 +278,13 @@ registers the `notchdemo://` scheme for it to fire at, with its own README.
 
 ## Uninstalling
 
-In this order, because the first step needs the app to still be there.
+A Homebrew install mostly takes care of itself. `brew uninstall --cask notchboard` quits the app
+and removes the login item (the cask carries directives for both), and adding `--zap` also deletes
+the data directories from step 4 below. The Keychain items and the stale permission rows, steps 5
+and 6, stay manual either way.
+
+For a copy installed by hand, in this order, because the first step needs the app to still be
+there.
 
 1. Open Settings from the menu bar and turn off "Launch at login". The app unregisters its own login
    item. Skipping this leaves the login item behind after the app is gone. If you have already

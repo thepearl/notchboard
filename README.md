@@ -199,11 +199,25 @@ clone builds and runs as-is.
 
 ## Installation and configuration
 
-There is no prebuilt download yet, so building from source is the only way to get the app today.
-That is a signing constraint rather than an effort one, and [docs/RELEASING.md](docs/RELEASING.md)
-explains it in full.
+**Standard route** is Homebrew:
 
-**Standard route**, which works for everyone:
+```bash
+brew install --cask thepearl/tap/notchboard
+```
+
+The download is signed with a Developer ID certificate and notarised by Apple, so the first launch
+is a double click, not a Gatekeeper fight. The tap prefix is there because a bare
+`brew install notchboard` needs acceptance into homebrew-cask, whose notability criteria this
+project does not meet yet.
+
+Without Homebrew, download `notchboard-<version>.zip` from the
+[latest release](https://github.com/thepearl/notchboard/releases/latest), unzip it, and drag
+`notchboard.app` into Applications. Same notarised build, same result.
+
+The app has no Dock icon, so look for the square in the menu bar.
+
+<details>
+<summary>Building from source</summary>
 
 ```bash
 git clone https://github.com/thepearl/notchboard.git
@@ -211,10 +225,7 @@ cd notchboard
 open notchboard.xcodeproj
 ```
 
-Press Run. The app has no Dock icon, so look for the square in the menu bar.
-
-<details>
-<summary>From the command line</summary>
+Press Run, or from the command line:
 
 ```bash
 xcodebuild -project notchboard.xcodeproj -scheme notchboard -configuration Debug build
@@ -237,10 +248,10 @@ after moving it, because the grant is bound to the path.
 Open System Settings, then Privacy and Security, then Accessibility. Add `notchboard.app` and switch
 it on.
 
-The grant does not survive a rebuild. Signing is ad-hoc, which means the signature is the binary
-hash, so every rebuild is a different app as far as macOS is concerned. Remove the old entry with the
-minus button and add the new build. A Developer ID certificate would end this, and it is on the
-[roadmap](ROADMAP.md).
+An installed release keeps the grant across updates, because every release is signed with the same
+Developer ID identity. A self-built copy does not: its signature is ad-hoc, which means it is the
+binary hash, so every rebuild is a different app as far as macOS is concerned. Remove the old entry
+with the minus button and add the new build.
 
 </details>
 
@@ -258,20 +269,6 @@ The password sent is the value of the group's first secret-typed field.
 
 The collection's scheme is checked when you press it, not when it is drawn. Without one, the button
 still appears, captioned "no URL scheme yet", and pressing it tells you where to set it.
-
-</details>
-
-<details>
-<summary>Homebrew, once a release exists</summary>
-
-The cask is written and waiting on a notarised release. When that lands:
-
-```bash
-brew install --cask thepearl/tap/notchboard
-```
-
-A bare `brew install notchboard` needs acceptance into homebrew-cask, whose notability criteria this
-project does not meet yet. [docs/RELEASING.md](docs/RELEASING.md) has the detail.
 
 </details>
 
@@ -554,7 +551,8 @@ Knowing the edges beats finding them the hard way.
 
 ## 🚀 Roadmap
 
-A notarised download, a Homebrew cask, a soft-delete trash, and the lint burned down.
+A soft-delete trash, the lint burned down, and homebrew-cask acceptance once the notability numbers
+are there.
 [ROADMAP.md](ROADMAP.md) has the detail, including the limits that are accepted rather than pending,
 and the short list of things that would justify building a backend.
 

@@ -1100,6 +1100,32 @@ payload), the late-joiner ordering that makes claim republishing unnecessary —
 retained claim still carrying the old name — and the view-model seam, polled rather than slept on.
 283 tests in 57 suites, no broker, no simulator.
 
+### 13.18 v1.0: public, notarised, on Homebrew (2026-08-20)
+
+The repository went public and v1.0 became installable:
+`brew install --cask thepearl/tap/notchboard`, or the zip on the releases page. The path was the
+one RELEASING.md predicted, with one lesson it did not. Signing the bundle with
+`--options runtime --timestamp` but without the deprecated `--deep` leaves the Swift compatibility
+dylibs in `Contents/Frameworks` ad-hoc signed, and the notary service rejects the whole archive
+over them (`libswiftCompatibilitySpan.dylib`, six errors, one file). The fix release.sh now prints
+is inside-out signing: each dylib in `Contents/Frameworks` first, the bundle last,
+`codesign --verify --deep --strict` as the check. The second submission came back Accepted in
+about a minute.
+
+Before the flip, a sweep of all 41 commits (gitleaks plus a targeted grep for broker hostnames and
+inline credentials) found nothing real — the only hits were the fabricated `sk-live-` fixture in
+`SecretMaskingTests`. The release chain was then verified the way a stranger meets it: the cask
+fetch matches the published sha256, the installed copy carries Homebrew's quarantine attribute and
+still assesses as `accepted, source=Notarized Developer ID`, and `brew audit --cask --online`
+reports no offenses.
+
+Two consequences worth remembering. The Accessibility grant now survives updates for installed
+copies, because every release carries the same Developer ID identity — the ad-hoc
+grant-lost-on-rebuild problem is now exclusive to source builds. And the bare
+`brew install notchboard` remains out of reach until the public repo meets homebrew-cask's
+notability numbers (75 stars, or 30 forks or watchers, higher for self-submission), which only
+started counting today.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between

@@ -38,8 +38,8 @@ Notability. A new package must demonstrate public interest beyond its author. A 
 project normally satisfies this by reaching at least 30 forks, 30 watchers or 75 stars,
 raised to at least 90 forks, 90 watchers or 225 stars when the repository owner submits it
 themselves. A repository less than 30 days old is normally not eligible. Notchboard's
-repository is private, so it has none of these and cannot accumulate them until it is
-public.
+repository went public on 2026-08-20 with the v1.0 release, so the counters are only
+starting to accumulate.
 
 Public presence and maintenance. The software must have a public presence independent of
 Homebrew, a homepage that explains the project, and active upstream maintenance with no
