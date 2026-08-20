@@ -119,6 +119,27 @@ final class RoomSession {
         connect()
     }
 
+    /// The display name changed. This copy is what every later claim and presence publish
+    /// carries, so it has to move while the session is alive — it used to be fixed at
+    /// construction, which left teammates reading the name this Mac launched with until
+    /// the next relaunch.
+    ///
+    /// Presence is the only republish, because `workspace.members[…]` is what renders a
+    /// name on every peer and presence writes it on both paths: live, it arrives on its
+    /// own; in replay, the ordered apply puts presence after claims, so it overwrites the
+    /// older name a retained claim still carries. Re-sealing every own claim would cost a
+    /// publish per marked row and change nothing on screen.
+    func updateSelfName(_ name: String) {
+        guard name != selfName else { return }
+        selfName = name
+        // The broker took the will at CONNECT time, so this only lands on the next
+        // reconnect — which is precisely when a stale will would announce the old name.
+        transport.lastWill = presenceMessage(.offline)
+        // Disconnected is already covered: finishReplay publishes fresh presence.
+        guard state == .connected else { return }
+        transport.publish(presenceMessage(.online))
+    }
+
     /// A claim renders free when its holder is offline — the live twin of
     /// releaseOrphanedClaims, and strictly a rendering rule: presence flicker must never
     /// mutate the catalogue.
@@ -657,6 +678,16 @@ final class SyncEngine {
 
     func session(for collectionID: String) -> RoomSession? {
         sessions[collectionID]
+    }
+
+    /// Renaming yourself, pushed into every room that is already running. The engine's own
+    /// copy only stamps sessions built from here on, so both have to be written.
+    func updateSelfName(_ name: String) {
+        guard name != selfName else { return }
+        selfName = name
+        for session in sessions.values {
+            session.updateSelfName(name)
+        }
     }
 
     /// Wired as `store.changeSink` (weakly — the store must not retain the engine that

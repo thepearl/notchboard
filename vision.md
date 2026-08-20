@@ -1062,6 +1062,44 @@ names, notes and non-secret values. Four of them fail against the old code.
 The group-id special-casing itself is untouched, and still the debt CLAUDE.md records — it is
 leak-safe now, not fixed.
 
+### 13.17 The rename that never left this Mac (2026-08-13)
+
+`SyncEngine` was built once, in `AppDelegate`, with `viewModel.selfName`, and every `RoomSession`
+copied that string again at its own construction. Nothing ever wrote either one afterwards, while
+the view model's copy moved the moment the onboarding field changed. So editing your name
+relabelled your own panel and stopped there: claims and presence kept publishing the launch-time
+name to the whole room, teammates kept reading it on in-use marks and in the online list, and
+nothing on either side suggested anything was stale. It cleared on relaunch, which is the worst
+kind of bug — it looks fixed to whoever goes looking.
+
+The path is now `NotchboardViewModel.updateSelfName` → `SyncEngine.updateSelfName` → every live
+`RoomSession`, and `selfName` is `private(set)` so a bare assignment can't skip it. One republish
+follows: retained presence, with the last will refreshed beside it.
+
+**Presence alone is enough, and own claims are deliberately not republished.** A name renders from
+`workspace.members[…]` on every peer, and presence writes that map on both paths it can arrive by —
+live, on its own, and in replay *after* claims, because the ordered apply ranks it last (meta →
+schemas → elements → claims → presence). So a late joiner reads the old name off the retained claim
+and then overwrites it with the current one from presence, before anything is drawn. Re-sealing
+every claim this member holds would cost one publish per marked row and change nothing on screen.
+
+The will is refreshed for the case presence can't reach: MQTT takes the will at CONNECT, so a
+session that renames and then dies ungracefully announces whatever it connected with. The fresh
+will applies from the next reconnect; a rename followed by a hard kill with no reconnect between
+leaves the old name on the broker until this Mac connects again. Same family of self-healing
+staleness as the offline release in §13.10, and not worth a protocol to close.
+
+**The push is debounced (500ms, the AppStateStore.scheduleSave idiom).** The name field is bound
+per keystroke, so pushing on the property change would publish retained presence for every
+character and have the room watch a name being typed — against the "a converged room is quiet"
+property the echo test exists to protect. The local label still updates per keystroke; only the
+wire waits.
+
+Four tests over the loopback broker: the republish itself (including the refreshed will's sealed
+payload), the late-joiner ordering that makes claim republishing unnecessary — asserted against a
+retained claim still carrying the old name — and the view-model seam, polled rather than slept on.
+283 tests in 57 suites, no broker, no simulator.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between

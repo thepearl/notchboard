@@ -194,12 +194,12 @@ struct IdentityTests {
     @Test("Claims are labelled with the onboarding first name, falling back to you")
     func claimLabel() {
         let vm = NotchboardViewModel()
-        vm.selfName = "John Doe"
+        vm.updateSelfName("John Doe")
         #expect(vm.selfClaimLabel == "john")
         // memberName resolves the local member id through the same label, so both must
         // give the *first* name — the row badge reads "● john", never a surname.
         #expect(vm.memberName(vm.selfMemberID) == "john")
-        vm.selfName = "   "
+        vm.updateSelfName("   ")
         #expect(vm.selfClaimLabel == "you")
     }
 
