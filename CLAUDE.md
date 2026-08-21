@@ -141,3 +141,13 @@ One deliberate, documented exception to the secrets posture: `simctl` takes the 
 - Sync's accepted rough edges (vision.md §13.10): a claim released while offline is reinstated by its own retained twin on reconnect and ages out via the auto-release sweep; broker-side tombstones expire after 30 days (`NBTombstone.retention`), so a peer offline longer can resurrect a deleted row; LWW silently drops one side of a genuinely simultaneous same-element edit (`automerge-swift` is the documented escalation). Sessions for collections removed by a snapshot *restore* aren't torn down until relaunch (delete handles it; restore doesn't yet).
 - AppKit accessory views in `NSAlert` prompts must not use `NSStackView`: it lays out with Auto Layout, and an empty `NSTextField`'s intrinsic width is a few points, so the export password field collapsed to a sliver and the password was invisible. `PromptAccessory` composes plain containers with fixed frames instead, and `PromptAccessoryTests` forces layout to keep it that way.
 - Timing-sensitive tests must poll rather than wait a fixed interval. The whole suite is main-actor isolated, so a heavy neighbour (PBKDF2, AES, snapshot IO) can delay a main-actor continuation well past a hard-coded deadline — that made the claim-tooltip test fail only in full runs, which reads as a product bug and isn't one.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repo's GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
