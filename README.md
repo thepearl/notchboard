@@ -1,5 +1,16 @@
 # Notchboard - Shared test accounts, docked to your iOS Simulator
 
+<h4 align="center">
+  <a href="https://github.com/thepearl/notchboard/actions/workflows/ci.yml">
+    <img src="https://github.com/thepearl/notchboard/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI" />
+  </a>
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey" alt="macOS 14+" />
+  <img src="https://img.shields.io/badge/Swift-5.0-orange?logo=swift&logoColor=white" alt="Swift 5" />
+  <a href="https://notchboard.gitbook.io/notchboard">
+    <img src="https://img.shields.io/badge/documentation-gitbook-blue" alt="Documentation" />
+  </a>
+</h4>
+
 ### 📚 [Read the documentation at notchboard.gitbook.io/notchboard](https://notchboard.gitbook.io/notchboard)
 
 Notchboard is a macOS menu-bar app that keeps your team's working test logins next to the simulator
@@ -14,16 +25,7 @@ end-to-end-encrypted room on a broker of their choosing.
 **Works with Xcode, Simulator, and a standard MQTT 5 broker** - or with nothing at all, if you keep
 it local.
 
-<h4 align="center">
-  <a href="https://github.com/thepearl/notchboard/actions/workflows/ci.yml">
-    <img src="https://github.com/thepearl/notchboard/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI" />
-  </a>
-  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey" alt="macOS 14+" />
-  <img src="https://img.shields.io/badge/Swift-5.0-orange?logo=swift&logoColor=white" alt="Swift 5" />
-  <a href="https://notchboard.gitbook.io/notchboard">
-    <img src="https://img.shields.io/badge/documentation-gitbook-blue" alt="Documentation" />
-  </a>
-</h4>
+
 
 <p align="center">
   <img src="docs/assets/notchboard-icon.png" alt="Notchboard" width="112" />
