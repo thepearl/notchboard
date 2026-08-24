@@ -1,6 +1,6 @@
 # Notchboard - Shared test accounts, docked to your iOS Simulator
 
-### 📚 [Read the documentation at notchboard.gitbook.io/notchboard](https://notchboard.gitbook.io/notchboard)
+### 📚 [Read the documentation at notchboard.gitbook.io/notchboard](https://notchboard.gitbook.io/notchboard/documentation)
 
 Notchboard is a macOS menu-bar app that keeps your team's working test logins next to the simulator
 you are already looking at. It attaches a slim notch to the edge of the Simulator window, follows
