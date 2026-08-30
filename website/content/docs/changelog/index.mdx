@@ -3,6 +3,18 @@ title: 'Changelog'
 description: Every Notchboard release, newest first.
 ---
 
+## 1.1 (30 August 2026)
+
+Android emulator support: the same experience, second platform.
+
+* The panel docks to the Android emulator window and follows it live, with one prerequisite: the emulator must run in its own window, not embedded in Android Studio's Running Devices tool window.
+* One-click login fires through `adb` into the app running on the emulator, with `SampleApp/NotchDemoAndroid` in the repository as the reference integration.
+* With a Simulator and an emulator both on screen, the panel docks to whichever you last clicked, and the login follows the dock.
+* The global shortcuts now also respond while Android Studio is frontmost, the role Xcode plays on the iOS side.
+* The documentation moved to [thepearl.github.io/notchboard](https://thepearl.github.io/notchboard/), with the FAQ, the integration reference and this changelog alongside it.
+
+Full details on the [GitHub release](https://github.com/thepearl/notchboard/releases/tag/v1.1).
+
 ## 1.0 (20 August 2026)
 
 The first public release of Notchboard, and the first one installable through Homebrew.
