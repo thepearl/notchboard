@@ -1,0 +1,108 @@
+---
+title: 'Deeplink scheme'
+description: >-
+  The URL Notchboard fires into the booted app for one-click login, and what
+  your app must register to receive it.
+---
+
+"login on sim" runs one command against the booted Simulator:
+
+```bash
+xcrun simctl openurl booted "<scheme>://debug/login?user=…&pass=…"
+```
+
+Docked to an Android emulator, the same button goes through `adb` instead. The login follows the dock; with neither docked it targets whichever platform is running, iOS on a tie:
+
+```bash
+adb -s emulator-<port> shell am start -a android.intent.action.VIEW -d "'<scheme>://debug/login?user=…&pass=…'"
+```
+
+The inner quotes matter: `adb shell` re-parses the URL through the device-side shell, and an unquoted `&` would truncate the intent at `user=`. Notchboard quotes it for you; keep the quotes if you drive it by hand.
+
+Notchboard only fires the URL. Your app's debug build registers the scheme and handles the route. This page documents both halves.
+
+## The scheme
+
+The scheme is stored per collection, because each catalogue describes one app. Switching collections switches the app you deeplink into. Set it from the ▾ menu next to the collection name in the panel header, or in Settings under Simulator deeplink.
+
+What you type is normalised before it is stored. A pasted `://` is stripped, and so are trailing `:`, `/` and `.` characters and whitespace, so `mythos`, `mythos:`, `mythos.` and `mythos://` all resolve to `mythos`.
+
+A scheme is accepted when it matches the URL scheme grammar, a letter first and then letters, digits, `+`, `-` or `.`. Network schemes (`http`, `https`, `ftp`, `file`, `ws`, `wss`) are refused outright, so pasting your app's universal link can never end up firing a username and password at a live host as query parameters.
+
+Validation runs twice, once when the scheme is entered and again when the button is pressed, because schemes also arrive from imported files.
+
+## The URL
+
+```
+<scheme>://debug/login?user=<encoded>&pass=<encoded>
+```
+
+* `user` carries the element's `username` field. The login button only appears when this field holds a value.
+* `pass` carries the group's first secret-typed field, read from memory so it is the real value and not the on-disk placeholder. When the group has no secret field, or that field is empty on this element, the URL carries only `user=`.
+
+Both values are percent-encoded against alphanumerics only. That aggressiveness is deliberate: an email's `@`, `+` and `.` are escaped, and so is every punctuation character a generated password can carry, so nothing in a credential can terminate the query or read as a separator. Decode the values before use, which `URLComponents` does for you.
+
+## What your app must register
+
+Two pieces, and nothing else: register the custom URL scheme, and handle the route.
+
+<Tabs items={['iOS', 'Android']}>
+  <Tab value="iOS">
+    Register the scheme in the debug build's `Info.plist`, then:
+
+    ```swift
+    .onOpenURL { url in
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.host == "debug", components.path == "/login",
+              let user = components.queryItems?.first(where: { $0.name == "user" })?.value
+        else { return }
+        let pass = components.queryItems?.first(where: { $0.name == "pass" })?.value
+        // fill your login form and submit
+    }
+    ```
+
+    `SampleApp/NotchDemo` in the repository is the working reference integration, with the full `Info.plist` block and a runnable demo app.
+  </Tab>
+
+  <Tab value="Android">
+    Register an intent filter in the debug manifest:
+
+    ```xml
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="yourscheme" android:host="debug" android:path="/login" />
+    </intent-filter>
+    ```
+
+    Then handle the route:
+
+    ```java
+    Uri url = intent.getData();
+    if (url != null && "debug".equals(url.getHost()) && "/login".equals(url.getPath())) {
+        String user = url.getQueryParameter("user");
+        String pass = url.getQueryParameter("pass");
+        // fill your login form and submit
+    }
+    ```
+
+    `getQueryParameter` percent-decodes, so emails and passwords with symbols survive the trip. Give the activity `android:launchMode="singleTop"` and handle `onNewIntent` too, or every login stacks a fresh activity instead of switching accounts in place. `SampleApp/NotchDemoAndroid` in the repository is the working reference integration.
+  </Tab>
+</Tabs>
+
+Two behaviours worth knowing before you assume the bridge is broken: iOS shows an "Open in ?" confirmation the first time a custom scheme is fired from outside, once per simulator install rather than once per login. And re-firing while already signed in swaps accounts, provided your handler resets the session first.
+
+If the deeplink succeeds and the account was free, it is marked in use automatically. If `simctl` or `adb` fails, nothing is marked.
+
+## The password is visible in the process list
+
+`simctl` and `adb` both take the URL as a command-line argument, so while that short-lived process runs the password in the query is readable by other processes running as the same user. There is no argument-free way to hand either tool a URL.
+
+Android adds one exposure of its own: emulators on API 32 and older log the intent's URL verbatim to logcat, credentials included. API 33 and later redact it to `scheme://host/...`.
+
+These are accepted, documented trade-offs. These are shared test credentials on a local dev tool. Everything under Notchboard's own control, its log lines and the tools' echoed errors, is redacted before it reaches a log or a toast.
+
+## Logins the deeplink cannot drive
+
+SSO redirects, Okta, anything rendered in a WebView, any flow where your app never receives the URL. For those, use "use + copy" for the username and the separate "copy password" button for the password, then paste them by hand. The account is still marked in use, so teammates still see it is taken.

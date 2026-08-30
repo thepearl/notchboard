@@ -26,7 +26,7 @@ Updates keep the Accessibility grant, because every release carries the same Dev
 The self-built copies the rest of this page describes are the ones that lose it on every rebuild.
 
 A bare `brew install notchboard` needs acceptance into homebrew-cask, whose notability criteria
-this project does not meet yet. [docs/RELEASING.md](docs/RELEASING.md) has the detail, along with
+this project does not meet yet. [the releasing guide](website/content/docs/documentation/releasing.mdx) has the detail, along with
 how a release is produced.
 
 ## Requirements for building from source

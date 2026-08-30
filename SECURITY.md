@@ -13,7 +13,7 @@ Include what you found, how to reproduce it, and what an attacker gains. You wil
 
 ## Scope
 
-In scope: the app itself, the encrypted export format, the room invite format, and the sync protocol. The [security model](https://notchboard.gitbook.io/notchboard/documentation/guides/security-model) describes the guarantees, and the [integration reference](https://notchboard.gitbook.io/notchboard/integration) describes the formats.
+In scope: the app itself, the encrypted export format, the room invite format, and the sync protocol. The [security model](https://thepearl.github.io/notchboard/documentation/guides/security-model/) describes the guarantees, and the [integration reference](https://thepearl.github.io/notchboard/integration/) describes the formats.
 
 Two exposures are accepted and documented rather than hidden: the deeplink password is briefly visible in the local process list while `simctl` runs, and an export file's non-secret fields are readable plaintext. Those are design decisions with their reasoning in the docs. Anything that breaks a stated guarantee (a secret readable without its password, room ciphertext the broker can decrypt, a way past the import trust boundary) very much is a vulnerability.
 

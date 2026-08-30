@@ -1,0 +1,6 @@
+{
+  "title": "Changelog",
+  "icon": "RotateCcwClock",
+  "root": true,
+  "pages": ["index"]
+}

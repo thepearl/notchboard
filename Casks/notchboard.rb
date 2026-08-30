@@ -1,7 +1,7 @@
 # Cask definition for a personal tap, not for homebrew/cask.
 #
 # Notchboard does not meet the homebrew/cask acceptance criteria yet (the thresholds and
-# what is missing are written out in docs/RELEASING.md), so this file exists to be copied
+# what is missing are written out in website/content/docs/documentation/releasing.mdx), so this file exists to be copied
 # into a tap repository as Casks/notchboard.rb:
 #
 #   brew tap thepearl/tap

@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Question about using the app
-    url: https://notchboard.gitbook.io/notchboard/help-center
+    url: https://thepearl.github.io/notchboard/help-center/
     about: The help centre answers the common ones, and the documentation covers the rest.
   - name: Security report
     url: https://github.com/thepearl/notchboard/security/advisories/new

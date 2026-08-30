@@ -1,0 +1,43 @@
+---
+title: 'Room invite format'
+description: The one-line paste code that joins a Mac to a team room.
+---
+
+An invitation to a team room is one paste-able line:
+
+```
+notchboard-room:<base64url of the room configuration>
+```
+
+Everything after the `notchboard-room:` prefix is base64url (RFC 4648 §5, unpadded) of the room configuration as JSON with sorted keys. The base64url alphabet is used because chat clients linkify `+` and `/` badly. It is a paste code rather than a clickable URL on purpose: it survives Slack, email and anything else unmangled, and it cannot be triggered by a stray click.
+
+## What travels inside
+
+The decoded JSON is the room configuration:
+
+* `brokerURL` gives the broker address, like `mqtts://host:8883` or `wss://host:443/path`, and may carry the shared account's username (`mqtts://user@host:8883`).
+* `room` names the room on the broker, one room per collection. It is a lowercased slug of letters, digits and hyphens.
+* `sealedBrokerPassword` is present only when the broker requires an account. It is the broker account's password as AES-GCM ciphertext under the room key. The host types it once at setup, and only holders of the room password can open it.
+* `firstSyncCompleted` is always `false` in an invite. It describes one Mac's history with the room, and an invitee has never merged.
+
+## Joining
+
+Joining takes the pasted invite plus the room password, and nothing else. The room password never travels inside an invite. It is shared out of band, like a wifi password. On first connect the joiner adopts the room's whole catalogue from the broker's retained messages, so no file changes hands.
+
+A wrong room password fails before any connection is attempted, because the sealed broker credential will not open under it. A bad join can never hammer the team's broker account.
+
+An invite that does not decode is refused loudly, never guessed at. Whitespace and surrounding newlines from pasting are tolerated, everything else is strict.
+
+## How safe is the line
+
+Safe to send over chat, because the only secret inside it (the broker account's password) is ciphertext. It is not public either: the broker address, account username and room name are readable. Treat it like an internal link.
+
+## The wire model, in consequences
+
+Once a Mac is in a room:
+
+* Every payload on the broker is ciphertext under the room key. The broker relays bytes it cannot read and sees only topic structure, sizes and timing.
+* Late joiners catch up from retained messages. The room always holds the entire current state, so there is no history protocol and no server beyond the broker.
+* Deletions carry tombstones. A Mac that was offline during a delete can tell "deleted" from "never saw it", so a deleted row does not resurrect from a stale copy.
+* Conflicting edits of the same element resolve last-write-wins by timestamp.
+* Marks of who is using what propagate live, and marks held by members who go offline render as free without being mutated.

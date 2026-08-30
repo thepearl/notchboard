@@ -1,0 +1,6 @@
+{
+  "title": "Integration",
+  "icon": "Cable",
+  "root": true,
+  "pages": ["index", "deeplink-scheme", "export-file-format", "room-invite-format"]
+}
