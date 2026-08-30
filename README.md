@@ -43,8 +43,9 @@ so look for the square in the menu bar. No Homebrew? Grab `notchboard-<version>.
 
 ## 📚 Documentation
 
-**Everything lives at [thepearl.github.io/notchboard](https://thepearl.github.io/notchboard/)**:
-[getting started](https://thepearl.github.io/notchboard/documentation/getting-started/quickstart/),
+**Everything lives at [thepearl.github.io/notchboard](https://thepearl.github.io/notchboard/documentation/)**:
+
+[Getting started](https://thepearl.github.io/notchboard/documentation/getting-started/quickstart/),
 day-to-day use, [team rooms](https://thepearl.github.io/notchboard/documentation/guides/team-rooms/),
 the [security model](https://thepearl.github.io/notchboard/documentation/guides/security-model/),
 every setting and shortcut, the [FAQ](https://thepearl.github.io/notchboard/help-center/), and the
