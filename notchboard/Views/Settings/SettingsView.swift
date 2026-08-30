@@ -76,7 +76,7 @@ struct SettingsView: View {
                     Text("Asked once, when you save.")
                 }
             } header: {
-                Text("Simulator deeplink — “\(viewModel.workspace.name)”")
+                Text("Debug deeplink — “\(viewModel.workspace.name)”")
             } footer: {
                 Text("Your app's debug build must register this scheme and handle /debug/login. One scheme per collection.")
                     .foregroundStyle(.secondary)

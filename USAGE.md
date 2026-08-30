@@ -30,10 +30,19 @@ Notchboard polls the Simulator window position through the Accessibility API and
 itself as you drag. Polling is adaptive: roughly 60 Hz while a drag is possible, 10 Hz while
 Simulator is merely frontmost, about 3 Hz otherwise.
 
-The docked panel floats above other windows only while Simulator or Notchboard itself is
-frontmost. Switch to Chrome and the panel drops behind it, exactly as the Simulator window
-does. This is deliberate, and Xcode is deliberately not on that list. The undocked panel and
-onboarding keep floating either way, since neither is glued to a window.
+The docked panel floats above other windows only while Simulator, the emulator, or Notchboard
+itself is frontmost. Switch to Chrome and the panel drops behind it, exactly as the Simulator
+window does. This is deliberate, and Xcode and Android Studio are deliberately not on that
+list. The undocked panel and onboarding keep floating either way, since neither is glued to a
+window.
+
+### Docking to the Android emulator
+
+The Android emulator docks the same way, with one prerequisite: it must run in its own window,
+not embedded in Android Studio's Running Devices tool window. Untick Settings > Tools >
+Emulator > "Launch in the Running Devices tool window", or start it with `emulator -avd
+<Name>`. With a Simulator and an emulator both on screen, the panel docks to whichever you
+last clicked. The emulator's toolbar sits on its right flank, so "Dock to: left" may suit it.
 
 ### Keyboard shortcuts
 
@@ -200,13 +209,23 @@ a sound.
 
 ## 5. The deeplink bridge
 
-"login on sim" fires a URL into the booted simulator so your app logs itself in.
+"login on sim" fires a URL into the docked device so your app logs itself in.
 
-It runs:
+Docked to the Simulator it runs:
 
 ```bash
 xcrun simctl openurl booted "<scheme>://debug/login?user=…&pass=…"
 ```
+
+Docked to an Android emulator, the same button goes through `adb` instead (the login follows
+the dock; with neither docked it targets whichever platform is running, iOS on a tie):
+
+```bash
+adb -s emulator-<port> shell am start -a android.intent.action.VIEW -d "'<scheme>://debug/login?user=…&pass=…'"
+```
+
+`SampleApp/NotchDemoAndroid/README.md` is the Android reference integration — an intent filter
+and one query-parsing handler.
 
 The username comes from the element's `username` field. The password comes from the group's
 first `secret` field, read from memory, so the real value and not the on-disk placeholder.
@@ -221,7 +240,7 @@ The scheme is per collection, because each catalogue describes one app. Two plac
 
 - The ▾ menu next to the collection name in the panel header. The item reads "set deeplink
   scheme" while there is none, and "deeplink scheme: <scheme>://…" once one is set.
-- Settings → Simulator deeplink → Debug URL scheme.
+- Settings → Debug deeplink → Debug URL scheme.
 
 `mythos`, `mythos:`, `mythos.` and `mythos://` all normalise to `mythos`. Network schemes
 (`http`, `https`, `ftp`, `file`, `ws`, `wss`) are refused, so pasting your app's universal link
@@ -259,14 +278,18 @@ flow where your app never receives the URL. For those, use "use + copy" for the 
 "copy password" for the password, then paste them by hand. You still get the in-use mark, so
 teammates still see the account is taken.
 
-### One accepted exposure
+### Accepted exposures
 
-`simctl` takes the URL as a command-line argument, so while that short-lived process runs the
-password is readable in the process list by other processes running as you. There is no
-argv-free way to hand `simctl` a URL. These are shared test credentials on a local dev tool,
-so the trade-off is accepted and documented rather than hidden. Everything under Notchboard's
-own control (its log lines, and `simctl`'s echoed stderr) is redacted. See the header of
-`notchboard/Docking/SimctlBridge.swift`.
+`simctl` and `adb` both take the URL as a command-line argument, so while that short-lived
+process runs the password is readable in the process list by other processes running as you.
+There is no argv-free way to hand either tool a URL. These are shared test credentials on a
+local dev tool, so the trade-off is accepted and documented rather than hidden. Everything
+under Notchboard's own control (its log lines, and the tools' echoed output) is redacted. See
+the header of `notchboard/Docking/DeeplinkBridge.swift`.
+
+Android adds one exposure of its own: emulators on API 32 and older log the intent's URL
+verbatim to logcat, credentials included. API 33 and later redact it. If your test devices run
+old images, know that the logcat buffer holds those logins.
 
 ---
 
@@ -537,7 +560,7 @@ Behaviour:
 - Launch at login. If macOS puts the registration in a pending state, a "Pending your approval
   in Login Items" row appears with a button that opens the right System Settings pane.
 
-Simulator deeplink, scoped to the active collection:
+Debug deeplink, scoped to the active collection:
 
 - Debug URL scheme. The scheme "login on sim" fires into. One per collection.
 - Warn before mixing production with another environment. Asked once, when you save.

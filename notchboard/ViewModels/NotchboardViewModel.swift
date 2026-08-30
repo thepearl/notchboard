@@ -793,9 +793,10 @@ final class NotchboardViewModel {
         toast("“\(workspace.name)” now deeplinks into \(resolved)://", color: .green)
     }
 
-    /// Injection point for tests — fires the deeplink into the simulator. Production uses
-    /// the real simctl bridge.
-    @ObservationIgnored var deeplinkOpener: (_ url: String, _ completion: @escaping (SimctlBridge.Failure?) -> Void) -> Void = SimctlBridge.openURL
+    /// Injection point for tests — fires the deeplink into the docked device. AppDelegate
+    /// installs the router that picks simctl or adb by what's docked; the simctl default
+    /// keeps previews and tests working without one. The view model stays tracker-ignorant.
+    @ObservationIgnored var deeplinkOpener: (_ url: String, _ completion: @escaping (DeeplinkFailure?) -> Void) -> Void = SimctlBridge.openURL
 
     func loginOnSim(_ element: NBElement) {
         guard let username = loginUsername(for: element) else {
@@ -817,7 +818,7 @@ final class NotchboardViewModel {
         deeplinkLog.log("login on sim: firing \(scheme, privacy: .public)://debug/login for “\(element.name, privacy: .public)” (password \(password != nil ? "included" : "absent", privacy: .public))")
         guard let url = NBDeeplinkScheme.debugLoginURL(scheme: scheme, username: username, password: password) else { return }
 
-        // Capture the element's owning group AND collection now: the simctl round-trip
+        // Capture the element's owning group AND collection now: the deeplink round-trip
         // takes ~0.5-2s, and resolving through the active ids at callback time silently
         // dropped the auto-mark whenever the user switched tabs — or collections —
         // mid-flight (while still toasting success).
@@ -841,7 +842,9 @@ final class NotchboardViewModel {
                     $0.lastUsed = "just now, by \(self.selfClaimLabel)"
                 }
             }
-            self.toast("⚡ logged in as “\(element.name)” on simulator", color: .green)
+            // No target named: the view model doesn't know which device the router picked,
+            // and the consequence is visible on the docked window itself.
+            self.toast("⚡ logged in as “\(element.name)”", color: .green)
         }
     }
 

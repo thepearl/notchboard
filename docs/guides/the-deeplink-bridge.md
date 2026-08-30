@@ -30,7 +30,7 @@ One thing decides whether the button appears at all: the element needs a non-emp
 The scheme is per collection, because each catalogue describes one app. Two places to set it:
 
 * The ▾ menu next to the collection name. The item reads **set deeplink scheme** while there is none, and shows the scheme once one is set.
-* Settings → Simulator deeplink → Debug URL scheme.
+* Settings → Debug deeplink → Debug URL scheme.
 
 <figure><img src="../assets/deeplink-scheme-dialog.png" alt="The debug URL scheme dialog for a collection"><figcaption>The scheme is stored per collection, so each catalogue drives its own app.</figcaption></figure>
 

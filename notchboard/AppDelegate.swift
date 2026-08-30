@@ -36,7 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem?
 
-    private let tracker = SimulatorWindowTracker()
+    private let simulatorTracker = DeviceWindowTracker(kind: .iosSimulator)
+    private let emulatorTracker = DeviceWindowTracker(kind: .androidEmulator)
     private var viewModel: NotchboardViewModel!
     private var onboarding: OnboardingViewModel!
     /// The room coordinator (vision.md §14.2). Created here — never in a view model's
@@ -118,13 +119,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // "notify me when it's free" — a permission dialog before any expressed interest
         // gets denied by reflex, and that denial is only reversible in System Settings.
 
-        // The panel repositions the moment the tracker lands a change — during a drag the
+        // The panel repositions the moment a tracker lands a change — during a drag the
         // tracker reads at ~60Hz, and waiting for a timer of our own is where the old
         // rubber-band lag came from.
-        tracker.onUpdate = { [weak self] in
+        simulatorTracker.onUpdate = { [weak self] in
             self?.updatePanelFrame()
         }
-        tracker.start()
+        emulatorTracker.onUpdate = { [weak self] in
+            self?.updatePanelFrame()
+        }
+        simulatorTracker.start()
+        emulatorTracker.start()
+
+        // The deeplink follows the dock: whichever device the panel is docked to gets the
+        // login. The view model stays tracker-ignorant — its default opener keeps previews
+        // and tests working without an AppDelegate.
+        viewModel.deeplinkOpener = { [weak self] url, completion in
+            guard let self else { return }
+            switch Self.deeplinkTarget(
+                docked: self.dockedTracker?.kind,
+                iosRunning: self.simulatorTracker.isRunning,
+                androidRunning: self.emulatorTracker.isRunning
+            ) {
+            case .iosSimulator:
+                SimctlBridge.openURL(url, completion: completion)
+            case .androidEmulator:
+                // A title that won't parse falls back to nil — adb's sole-device default.
+                let serial = DeviceKind.consolePort(fromTitle: self.emulatorTracker.windowTitle)
+                    .map { "emulator-\($0)" }
+                AdbBridge.openURL(url, serial: serial, completion: completion)
+            }
+        }
 
         // The window level and the chords react to app switches the instant they happen —
         // the panel dropping behind Chrome must not wait out a timer tick.
@@ -165,7 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeys.setEnabled(false)
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         repositionTimer?.invalidate()
-        tracker.stop()
+        simulatorTracker.stop()
+        emulatorTracker.stop()
         // Say goodbye to every room properly (retained offline presence) so teammates see
         // the claims render free now rather than after the broker's will timeout.
         syncEngine?.sleepAll()
@@ -240,7 +266,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setUpPanel() {
-        let rootView = NotchboardSceneView(viewModel: viewModel, onboarding: onboarding, tracker: tracker)
+        let rootView = NotchboardSceneView(viewModel: viewModel, onboarding: onboarding,
+                                           isDeviceRunning: { [weak self] in
+                                               guard let self else { return false }
+                                               return self.simulatorTracker.isRunning || self.emulatorTracker.isRunning
+                                           })
         let hosting = NSHostingController(rootView: rootView)
 
         let panel = FloatingPanel(
@@ -485,8 +515,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
     }
 
-    /// Apps in whose company Notchboard is allowed to claim its chords: the iOS development
-    /// context the tool exists to sit alongside, plus itself.
+    /// Apps in whose company Notchboard is allowed to claim its chords: the mobile
+    /// development context the tool exists to sit alongside, plus itself. Android Studio
+    /// plays the role Xcode does for iOS; the emulator itself has no bundle id, so it is
+    /// matched by predicate in `hotKeyHostIsFrontmost`.
     ///
     /// This is the mechanism that makes a plain single-modifier chord defensible. A Carbon
     /// registration is consumed system-wide, and ⌃K/⌃N in particular are real bindings
@@ -497,42 +529,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Rectangle uses the same idea in reverse, unregistering its hotkeys while a chosen app
     /// is frontmost.
     private static let hotKeyHostBundleIDs: Set<String> = [
-        SimulatorWindowTracker.simulatorBundleID,
+        DeviceKind.simulatorBundleID,
         "com.apple.dt.Xcode",
+        "com.google.android.studio",
         Bundle.main.bundleIdentifier ?? "flourix.notchboard",
     ]
 
     /// True while the frontmost app is one Notchboard may claim chords around.
     private var hotKeyHostIsFrontmost: Bool {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return false
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        if let bundleID = app.bundleIdentifier, Self.hotKeyHostBundleIDs.contains(bundleID) {
+            return true
         }
-        return Self.hotKeyHostBundleIDs.contains(bundleID)
+        return DeviceKind.androidEmulator.matches(app)
     }
 
-    /// Keeps the panel stacked like it's glued to the Simulator window, not floating over
+    /// Keeps the panel stacked like it's glued to the host window, not floating over
     /// the whole machine. At a permanent `.floating` level the panel stayed on top when
     /// the user switched to Chrome — Chrome covered the Simulator (normal level) but not
     /// the panel, leaving it visibly docked to a window that was no longer there. So the
-    /// panel floats only while Simulator (or Notchboard itself — the Settings window)
-    /// is frontmost and drops to `.normal` otherwise, where the newly activated app
-    /// covers it exactly as it covers Simulator. Deliberately NOT the hotkey set: in
-    /// Xcode the panel behaves like any sibling window too ("with Simulator only" —
-    /// team feedback). Onboarding and the undocked fallback keep floating — they aren't
-    /// glued to anything. Runs on app-activation notifications and the fallback tick,
-    /// equality-guarded like everything else on that tick.
+    /// panel floats only while a dock host — Simulator or emulator — (or Notchboard
+    /// itself, the Settings window) is frontmost and drops to `.normal` otherwise, where
+    /// the newly activated app covers it exactly as it covers the host. Deliberately NOT
+    /// the hotkey set: in Xcode and Android Studio the panel behaves like any sibling
+    /// window too ("with Simulator only" — team feedback). Onboarding and the undocked
+    /// fallback keep floating — they aren't glued to anything. Runs on app-activation
+    /// notifications and the fallback tick, equality-guarded like everything else on
+    /// that tick.
     private func syncPanelLevel() {
         guard panel != nil else { return }
-        let shouldFloat = onboarding.isPresented || viewModel.fallbackPanelVisible || simulatorOrSelfIsFrontmost
+        let shouldFloat = onboarding.isPresented || viewModel.fallbackPanelVisible || dockHostOrSelfIsFrontmost
         let level: NSWindow.Level = shouldFloat ? .floating : .normal
         guard panel.level != level else { return }
         panel.level = level
     }
 
-    private var simulatorOrSelfIsFrontmost: Bool {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return false }
-        return bundleID == SimulatorWindowTracker.simulatorBundleID
-            || bundleID == Bundle.main.bundleIdentifier
+    private var dockHostOrSelfIsFrontmost: Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        if let bundleID = app.bundleIdentifier,
+           bundleID == DeviceKind.simulatorBundleID || bundleID == Bundle.main.bundleIdentifier {
+            return true
+        }
+        return DeviceKind.androidEmulator.matches(app)
     }
 
     /// Claims the global chords only while they can be acted on *and* the user is in the
@@ -552,11 +590,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// True when the panel is actually on screen for the user to see the shortcut's effect.
     /// Shortcuts must never mutate an invisible panel — a Simulator that is running but
-    /// hidden/minimized keeps `isSimulatorRunning` true while the panel is ordered out, and
+    /// hidden/minimized keeps `isRunning` true while the panel is ordered out, and
     /// stale state would surface later as a panel reopening in a view the user never chose.
     private var panelIsInteractable: Bool {
         if viewModel.fallbackPanelVisible { return true }
-        return tracker.isSimulatorRunning && tracker.simulatorWindowFrame != nil && panel.isVisible
+        return dockedTracker != nil && panel.isVisible
     }
 
     /// Returns `true` if the event was one of our shortcuts and was handled (so the local
@@ -628,6 +666,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Panel positioning
 
+    /// Which device kind the panel docks to when both hosts could claim it: among hosts
+    /// with a window on screen, the one the user most recently clicked into wins; a tie
+    /// (neither activated since launch) goes to the Simulator. Sticky by construction —
+    /// the activation stamps only move on a genuine app switch — and the loser takes over
+    /// automatically when the winner's frame goes nil, through the same code path that
+    /// already handles Simulator quitting. Pure over plain values so the rule is testable
+    /// without a tracker.
+    static func dockedKind(
+        simulatorFrame: CGRect?, simulatorActivatedAt: Date?,
+        emulatorFrame: CGRect?, emulatorActivatedAt: Date?
+    ) -> DeviceKind? {
+        switch (simulatorFrame != nil, emulatorFrame != nil) {
+        case (false, false): return nil
+        case (true, false): return .iosSimulator
+        case (false, true): return .androidEmulator
+        case (true, true):
+            let simulatorAt = simulatorActivatedAt ?? .distantPast
+            let emulatorAt = emulatorActivatedAt ?? .distantPast
+            return emulatorAt > simulatorAt ? .androidEmulator : .iosSimulator
+        }
+    }
+
+    /// Where a fired deeplink goes: the docked device wins, else the sole running one,
+    /// else iOS (simctl's own "no booted simulator" is the clearest possible message
+    /// when nothing is running at all).
+    static func deeplinkTarget(docked: DeviceKind?, iosRunning: Bool, androidRunning: Bool) -> DeviceKind {
+        if let docked { return docked }
+        if androidRunning, !iosRunning { return .androidEmulator }
+        return .iosSimulator
+    }
+
+    private var dockedTracker: DeviceWindowTracker? {
+        switch Self.dockedKind(
+            simulatorFrame: simulatorTracker.windowFrame, simulatorActivatedAt: simulatorTracker.lastActivatedAt,
+            emulatorFrame: emulatorTracker.windowFrame, emulatorActivatedAt: emulatorTracker.lastActivatedAt
+        ) {
+        case .iosSimulator: return simulatorTracker
+        case .androidEmulator: return emulatorTracker
+        case nil: return nil
+        }
+    }
+
     private func updatePanelFrame() {
         guard let panel else { return }
 
@@ -640,7 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // coach mark the first time it appears instead of silently skipping it. Lives on
         // this AppKit-side tick (not a SwiftUI onChange) so no view has to observe the
         // tracker, whose per-poll property writes would re-render the whole panel tree.
-        if tracker.isSimulatorRunning, viewModel.pendingCoachMark, !onboarding.isPresented {
+        if simulatorTracker.isRunning || emulatorTracker.isRunning, viewModel.pendingCoachMark, !onboarding.isPresented {
             viewModel.pendingCoachMark = false
             viewModel.showCoachMark = true
             viewModel.isExpanded = false
@@ -653,7 +733,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Derived, not set imperatively: onboarding can now turn the fallback on too, and a
         // title written only by the menu handler would have gone stale.
-        let fallbackTitle = viewModel.fallbackPanelVisible ? "Dock to Simulator Again" : "Show Panel (Undocked)"
+        let fallbackTitle = viewModel.fallbackPanelVisible ? "Dock Again" : "Show Panel (Undocked)"
         if fallbackMenuItem?.title != fallbackTitle { fallbackMenuItem?.title = fallbackTitle }
 
         // Onboarding always shows regardless of whether Simulator happens to be running yet —
@@ -682,9 +762,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Docked to Simulator: once onboarded, Notchboard only exists alongside a running,
-        // visible Simulator window.
-        guard tracker.isSimulatorRunning, let simFrame = tracker.simulatorWindowFrame else {
+        // Docked: once onboarded, Notchboard only exists alongside a running, visible
+        // device window — Simulator or emulator, arbitrated by dockedKind.
+        guard let docked = dockedTracker, let hostFrame = docked.windowFrame else {
             hide(panel)
             return
         }
@@ -708,12 +788,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The collapsed notch sits a touch below the window's vertical centre (team
         // feedback) — the expanded panel stays centred.
         let isNotchMode = mode == .notch || mode == .notchWithCoachMark
+        let verticalOffset = isNotchMode
+            ? -Self.collapsedNotchOffset(kind: docked.kind, edge: viewModel.dockEdge,
+                                         hostHeight: hostFrame.height, notchHeight: size.height)
+            : 0
         let frame = Self.dockedFrame(
-            simFrame: simFrame,
+            hostFrame: hostFrame,
             size: size,
             edge: viewModel.dockEdge,
-            clampedTo: screenContaining(simFrame)?.visibleFrame,
-            verticalOffset: isNotchMode ? -Self.notchVerticalOffset : 0
+            clampedTo: screenContaining(hostFrame)?.visibleFrame,
+            verticalOffset: verticalOffset
         )
         apply(frame, to: panel, mode: mode)
     }
@@ -721,15 +805,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// How far below the Simulator window's vertical centre the collapsed notch sits.
     static let notchVerticalOffset: CGFloat = 10
 
-    /// The docked panel frame: flush against the chosen Simulator window edge, vertically
+    /// How far down the emulator window's right flank its Qt toolbar reaches — the fixed
+    /// stack of controls from the window buttons through the nav trio and the ⋯ button —
+    /// plus a small gap. Measured on the first live-AVD run (~515pt on a Pixel-sized
+    /// window), where the centre-placed notch parked itself on top of the nav buttons.
+    static let emulatorToolbarClearance: CGFloat = 523
+
+    /// The collapsed notch's downward offset from the host window's vertical centre.
+    /// A right-docked emulator notch must also clear the toolbar hanging down that flank,
+    /// so its offset grows exactly as much as needed to put the notch's top just below
+    /// `emulatorToolbarClearance` — a tall window keeps the near-centre look, a typical
+    /// one drops the notch below the ⋯ button. Left docking has no toolbar to dodge and
+    /// keeps the standard nudge, as does the Simulator.
+    static func collapsedNotchOffset(kind: DeviceKind, edge: NBDockEdge,
+                                     hostHeight: CGFloat, notchHeight: CGFloat) -> CGFloat {
+        guard kind == .androidEmulator, edge == .right else { return notchVerticalOffset }
+        return max(notchVerticalOffset, emulatorToolbarClearance + notchHeight / 2 - hostHeight / 2)
+    }
+
+    /// The docked panel frame: flush against the chosen host window edge, vertically
     /// centred on it, then clamped to the screen's visible frame. Without the clamp, a
-    /// Simulator window flush against the screen edge (zoomed, fullscreen) put the whole
+    /// host window flush against the screen edge (zoomed, fullscreen) put the whole
     /// panel offscreen — still "visible" as far as AppKit was concerned, but unreachable.
     /// Borderless panels get none of AppKit's usual titled-window frame constraining.
-    static func dockedFrame(simFrame: NSRect, size: CGSize, edge: NBDockEdge, clampedTo visible: NSRect?, verticalOffset: CGFloat = 0) -> NSRect {
-        let x = edge == .right ? simFrame.maxX : simFrame.minX - size.width
+    static func dockedFrame(hostFrame: NSRect, size: CGSize, edge: NBDockEdge, clampedTo visible: NSRect?, verticalOffset: CGFloat = 0) -> NSRect {
+        let x = edge == .right ? hostFrame.maxX : hostFrame.minX - size.width
         // AppKit is bottom-left origin: a negative offset moves the window DOWN screen.
-        let y = simFrame.midY - size.height / 2 + verticalOffset
+        let y = hostFrame.midY - size.height / 2 + verticalOffset
         var frame = NSRect(x: x, y: y, width: size.width, height: size.height)
         if let visible {
             frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
@@ -753,7 +855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Simulator as a notch if there is one, and otherwise dismiss (a notch docked to
         // nothing makes no sense) — re-expanded, so the next dock isn't a stranded notch.
         guard viewModel.isExpanded else {
-            let canDock = tracker.isSimulatorRunning && tracker.simulatorWindowFrame != nil
+            let canDock = dockedTracker != nil
             setFallbackVisible(false)
             if !canDock { viewModel.isExpanded = true }
             return

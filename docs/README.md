@@ -54,7 +54,7 @@ Where the minutes actually go, and what replaces them.
 | One-click login          |     ✅     | A booted simulator, a URL handler in your app, and a scheme set on the collection |
 | Team room                |     ✅     | An MQTT 5 broker with retained messages, including a local mosquitto              |
 | Physical iOS device      |     ⚠️    | Copy and paste only, `simctl` cannot reach a real device                          |
-| Android or emulators     |     ❌     | Not supported, and not planned                                                    |
+| Android emulator         |     ⚠️    | New: the emulator in its own window, plus `adb`; not yet exercised on a live AVD  |
 | Mac App Store build      |     ❌     | Impossible by design, the App Sandbox breaks docking                              |
 
 ## What it is not

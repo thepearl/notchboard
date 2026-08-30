@@ -175,7 +175,7 @@ final class GlobalHotKeys {
 
     // No `deinit` teardown: deinit is nonisolated and these registrations are main-actor
     // state, so cleaning up there would be an unchecked cross-isolation call (the same trap
-    // SimulatorWindowTracker had). AppDelegate owns this object for the app's lifetime and
+    // DeviceWindowTracker had). AppDelegate owns this object for the app's lifetime and
     // calls `setEnabled(false)` in applicationWillTerminate. Carbon registrations are
     // process-scoped anyway, so they die with the process regardless.
 }

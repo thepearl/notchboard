@@ -25,7 +25,7 @@ struct SimctlBridgeIntegrationTests {
 
 
     /// Runs the bridge and waits for its completion, which is delivered on the main queue.
-    private func fire(_ url: String, timeout: TimeInterval = 30) async -> SimctlBridge.Failure?? {
+    private func fire(_ url: String, timeout: TimeInterval = 30) async -> DeeplinkFailure?? {
         await withCheckedContinuation { continuation in
             let resumed = LockedFlag()
             SimctlBridge.openURL(url) { failure in
@@ -54,24 +54,10 @@ struct SimctlBridgeIntegrationTests {
     }
 }
 
-/// One-shot flag so a continuation can't be resumed twice (completion + timeout racing).
-private final class LockedFlag: @unchecked Sendable {
-    private var used = false
-    private let lock = NSLock()
-
-    func setOnce() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if used { return false }
-        used = true
-        return true
-    }
-}
-
-extension SimctlBridge.Failure: @retroactive Equatable {
+extension DeeplinkFailure: @retroactive Equatable {
     public static func == (lhs: Self, rhs: Self) -> Bool {
         switch (lhs, rhs) {
-        case (.noBootedSimulator, .noBootedSimulator): return true
+        case (.deviceNotAvailable(let l), .deviceNotAvailable(let r)): return l == r
         case (.failed(let l), .failed(let r)): return l == r
         default: return false
         }

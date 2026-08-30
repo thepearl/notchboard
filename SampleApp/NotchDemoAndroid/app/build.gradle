@@ -1,0 +1,18 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Deliberately dependency-free: a single plain-framework Activity, so the demo builds
+// with nothing but the SDK and proves only what it exists to prove — the deeplink.
+android {
+    namespace 'com.flourix.notchdemo'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.flourix.notchdemo"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+}

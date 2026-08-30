@@ -16,7 +16,7 @@ xcrun simctl install booted build/Debug-iphonesimulator/NotchDemo.app
 xcrun simctl launch booted flourix.notchdemo
 ```
 
-Then in Notchboard, set the scheme to `notchdemo` under Settings, Simulator deeplink (it starts
+Then in Notchboard, set the scheme to `notchdemo` under Settings, Debug deeplink (it starts
 empty, and it is per collection). Open any element with a username and hit "login on sim".
 
 To drive it by hand:
