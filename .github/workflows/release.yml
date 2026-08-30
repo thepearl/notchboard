@@ -2,7 +2,7 @@ name: Release
 
 # Pushing a v* tag builds, signs, notarises, staples and publishes a release, then bumps
 # the tap. It automates exactly the by-hand steps scripts/release.sh prints (see
-# docs/RELEASING.md for why each one exists). The tap is bumped BEFORE the release is
+# website/content/docs/documentation/releasing.mdx for why each one exists). The tap is bumped BEFORE the release is
 # published, so the "Cask checksum" workflow that fires on publication finds a matching
 # pin instead of a race.
 #

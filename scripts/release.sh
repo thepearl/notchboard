@@ -5,7 +5,7 @@
 # notarisation, stapling) is printed as commands to run by hand, never executed here, so
 # this script works on a machine with no certificates and no App Store Connect key.
 #
-# See docs/RELEASING.md for the full checklist and for why an unsigned download is
+# See website/content/docs/documentation/releasing.mdx for the full checklist and for why an unsigned download is
 # refused by Gatekeeper.
 
 set -euo pipefail

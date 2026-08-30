@@ -1,0 +1,22 @@
+{
+  "title": "Documentation",
+  "icon": "Book",
+  "root": true,
+  "pages": [
+    "index",
+    "---Getting started---",
+    "...getting-started",
+    "---Core concepts---",
+    "...core-concepts",
+    "---Guides---",
+    "...guides",
+    "---Reference---",
+    "...reference",
+    "---Project---",
+    "contributing",
+    "licence",
+    "---For maintainers---",
+    "releasing",
+    "room-test-plan"
+  ]
+}

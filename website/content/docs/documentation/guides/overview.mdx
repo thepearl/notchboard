@@ -1,0 +1,30 @@
+---
+title: 'Guides'
+icon: GraduationCap
+description: >-
+  Walkthroughs for team rooms, one-click login, file transfer and the security
+  model.
+---
+
+The four things worth reading once, in the order most people need them.
+
+import { Archive, Link, ShieldHalf, Users } from 'lucide-react';
+
+<Cards>
+  <Card icon={<Users />} href="./team-rooms.mdx" title="Team rooms">
+    Keep one collection in sync across Macs, end-to-end encrypted, with no backend of ours.
+  </Card>
+  <Card icon={<Link />} href="./the-deeplink-bridge.mdx" title="The deeplink bridge">
+    Fire a login straight into the booted app, and what your app needs to receive it.
+  </Card>
+  <Card icon={<Archive />} href="./exports-imports-and-snapshots.mdx" title="Exports, imports and snapshots">
+    Move a collection between Macs, and get one back after an accident.
+  </Card>
+  <Card icon={<ShieldHalf />} href="./security-model.mdx" title="Security model">
+    What is encrypted, what is not, and the exposures that are accepted rather than hidden.
+  </Card>
+</Cards>
+
+<Callout type="info">
+If you only read one, read the [security model](./security-model.mdx) before putting anything sensitive into a room or an export file.
+</Callout>

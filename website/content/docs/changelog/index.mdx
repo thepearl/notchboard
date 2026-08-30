@@ -1,0 +1,29 @@
+---
+title: 'Changelog'
+description: Every Notchboard release, newest first.
+---
+
+## 1.0 (20 August 2026)
+
+The first public release of Notchboard, and the first one installable through Homebrew.
+
+```bash
+brew install --cask thepearl/tap/notchboard
+```
+
+The build is signed with a Developer ID certificate and notarised, so the first launch is a double click rather than a Gatekeeper dialog.
+
+What you get:
+
+* The panel docks to the iOS Simulator window and follows it live as the window moves, without ever stealing focus.
+* Test accounts and fixtures live in a searchable catalogue, organised into collections, groups and elements.
+* Secret-typed values stay in the Keychain and are masked everywhere except the detail view's reveal toggle.
+* Marking an account as in use shows teammates who has it and who is online, so nobody logs in behind you.
+* One-click login fires the account into the booted app through a URL scheme set per collection.
+* Exports are encrypted for moving a collection between Macs, and local snapshots are encrypted too.
+* Team rooms sync end-to-end encrypted over any standard MQTT broker, and joining takes one pasted invite line plus the room password.
+* The global shortcuts respond only while Xcode, Simulator or Notchboard itself is frontmost, so they never swallow keys anywhere else.
+* When no simulator is running, the menu bar opens the panel undocked and everything except docking still works.
+* The app can launch at login.
+
+Full details on the [GitHub release](https://github.com/thepearl/notchboard/releases/tag/v1.0).

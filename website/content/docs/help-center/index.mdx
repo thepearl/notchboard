@@ -1,0 +1,98 @@
+---
+title: 'Frequently asked questions'
+description: >-
+  Answers to the questions that come up installing Notchboard, docking the
+  panel, handling secrets and running team rooms.
+---
+
+## Installing and updating
+
+### How do I install Notchboard?
+
+Through Homebrew:
+
+```bash
+brew install --cask thepearl/tap/notchboard
+```
+
+Or download `notchboard-<version>.zip` from the latest GitHub release, unzip it, and drag `notchboard.app` into Applications. Both routes give you the same signed and notarised build, so the first launch is a double click. Building from source is covered on the [installation page](../documentation/getting-started/installation.mdx).
+
+### Does updating through Homebrew keep the Accessibility permission?
+
+Yes. Every release is signed with the same Developer ID identity, so macOS treats each update as the same app and the grant survives. A copy you build yourself is signed ad hoc, which makes every rebuild a different app as far as macOS is concerned, so a self-built copy loses the grant on each rebuild and you re-add it in System Settings.
+
+### What does Notchboard cost?
+
+Nothing. It is free under the Apache-2.0 licence, with the source on GitHub. There is no paid tier and no account to create.
+
+## Docking and permissions
+
+### Does it work without the Simulator?
+
+Yes. The menu-bar item's Show Panel (Undocked) opens the panel as an ordinary floating window, and everything except docking works from there. The same fallback applies when the Accessibility permission is missing.
+
+### Why did no permission dialog appear, and why does nothing dock?
+
+macOS asks for the Accessibility permission only once, and after you dismiss that dialog further attempts show nothing. Grant it by hand in System Settings, Privacy & Security, Accessibility, and turn the Notchboard switch on. Once it is on, the panel docks the next time a Simulator window is on screen. If the switch is on and nothing docks, check that the entry points at the copy of the app you actually launch, then see the [troubleshooting page](../documentation/reference/troubleshooting.mdx).
+
+### Does it work with the Android emulator?
+
+Yes, the same way. The one prerequisite is that the emulator runs in its own window rather than embedded in Android Studio's Running Devices tool window — untick that setting or start it with `emulator -avd <Name>`. One-click login goes through `adb`, so install Android's platform-tools. With a Simulator and an emulator both on screen, the panel docks to whichever you last clicked.
+
+### Why does my global shortcut do nothing in Terminal?
+
+By design. The global chords register only while Xcode, Simulator or Notchboard itself is frontmost, so every other app keeps its own meaning of the chord. Switch to Terminal and ⌃K goes back to being kill-line.
+
+### Why did the panel drop behind my browser?
+
+The docked panel floats above other windows only while Simulator or Notchboard is frontmost, so it does not hover over your browser while the Simulator it belongs to is buried. Click the Simulator window to bring it back, or use Show Panel (Undocked), which always floats.
+
+## The catalogue and secrets
+
+### What does marking a field secret actually do?
+
+It moves the value out of every plaintext surface. On disk the value is replaced by a Keychain placeholder, in an export file it travels inside the encrypted envelope, and on screen it is masked behind a reveal toggle. Copying it marks the clipboard entry as concealed and clears it after 60 seconds. If a value should not sit in a plaintext file, type it secret.
+
+### Why doesn't search find my password?
+
+That is deliberate. Secret-typed values are excluded from search, because a field that confirms substrings of a secret would let anyone standing near the panel guess it piece by piece. Search matches names, notes and every non-secret field instead.
+
+### Can I be told when an account is free?
+
+Yes. Open an element someone else is using and press "notify me when it's free". You get a macOS notification when it is released, whether by hand, by auto-release or because the holder went offline. The watch does not survive a relaunch of Notchboard.
+
+## Team rooms
+
+### What does a team room need?
+
+Any standard MQTT 5 broker, from a local mosquitto to a free hosted tier. TLS is required for any broker that is not localhost, and a plaintext address pointed at a real host is refused. Joining takes one pasted invite line plus the room password, sent separately. The [team rooms guide](../documentation/guides/team-rooms.mdx) walks through hosting and joining.
+
+### Does Notchboard have a server?
+
+No. There is no backend at all. The broker you choose is the only server involved, and it only relays ciphertext it cannot read. The [security model](../documentation/guides/security-model.mdx) explains what the broker operator can and cannot see.
+
+### What happens to my collection when I join an existing room?
+
+The room's catalogue replaces whatever that collection held locally, because the room is the source of truth once you are in it. A snapshot is forced immediately before, and that snapshot is the only undo. Join with a fresh collection when you have anything you want to keep.
+
+### How do I remove someone from a room?
+
+Create a new room with a new name and a new password, then invite everyone else again. There is no server, so there is nobody to revoke them at, and rotating the room password in place is refused because it would lock out the whole team.
+
+## Data and privacy
+
+### Where does my data live?
+
+Collections and settings live in `state.json` under `~/Library/Application Support/Notchboard/`, encrypted snapshots in `~/.notchboard/snapshots/`, and secret values and room passwords in the login Keychain. Copying `state.json` to another Mac loads with empty secret fields, because the Keychain entries stay behind. Move a collection with an encrypted export instead.
+
+### What does an export protect?
+
+Secret-typed field values, sealed under the export password. Everything else in the file is readable plaintext, including element names, usernames, notes, schemas and environments. The file is exactly as strong as the password you gave it, which is why the prompt offers a generator. The [security model](../documentation/guides/security-model.mdx) has the full split.
+
+### I forgot my export password. Can the secrets be recovered?
+
+No. The secret values in that file are unrecoverable without its password. If the original collection still exists on any Mac, export it again with a new password.
+
+### How do I uninstall completely?
+
+Run `brew uninstall --cask notchboard`, which quits the app and removes the login item, and add `--zap` to also delete the data directories. The Keychain entries stay manual either way, so search for `flourix.notchboard` in Keychain Access and delete the matches. The [installation page](../documentation/getting-started/installation.mdx) has the step-by-step version for a copy installed by hand.

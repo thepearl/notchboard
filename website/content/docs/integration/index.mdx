@@ -1,0 +1,16 @@
+---
+title: 'Integration reference'
+description: >-
+  The three stable surfaces an integrator meets: the deeplink scheme, the
+  export file format and the room invite format.
+---
+
+Notchboard has no REST API and no SDK. The app is local-first. Your catalogue lives on your Mac, and the only server anywhere near it is an MQTT broker that relays ciphertext when a collection joins a team room.
+
+What it does have are three stable surfaces an integrator meets:
+
+* [The deeplink scheme](./deeplink-scheme.mdx) is the URL Notchboard fires into the app running in the booted Simulator or Android emulator for one-click login. Your app registers the scheme and parses the query.
+* [The export file format](./export-file-format.mdx) describes the `.notchboard` file, a JSON document with every secret-typed value sealed inside an encrypted envelope.
+* [The room invite format](./room-invite-format.mdx) describes the one-line paste code that joins a Mac to a team room.
+
+Everything else in the app (the panel, the docking, the Keychain handling) is an implementation detail with no contract attached.

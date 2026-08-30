@@ -1,0 +1,6 @@
+{
+  "title": "Help center",
+  "icon": "CircleQuestionMark",
+  "root": true,
+  "pages": ["index"]
+}
