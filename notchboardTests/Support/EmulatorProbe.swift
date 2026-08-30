@@ -36,8 +36,11 @@ enum EmulatorProbe {
     /// documents). Build and install it first — see SampleApp/NotchDemoAndroid/README.md.
     nonisolated static let hasNotchDemoInstalled: Bool = {
         guard hasRunningEmulator, let adbPath = AdbBridge.adbPath else { return false }
+        // `--user current` is load-bearing: without it, `pm resolve-activity` on API 35
+        // resolves against no user at all and reports "No activity found" even when the
+        // app is installed — a false negative that silently skips the success-path test.
         let output = adb(adbPath, [
-            "shell", "pm", "resolve-activity",
+            "shell", "pm", "resolve-activity", "--user", "current",
             "-a", "android.intent.action.VIEW", "-d", "notchdemo://debug/login",
         ])
         return output?.contains(demoPackage) ?? false

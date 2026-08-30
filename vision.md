@@ -1196,10 +1196,17 @@ a right-docked emulator notch grows its downward offset exactly enough to put it
 `emulatorToolbarClearance` (measured, and pinned by `CollapsedNotchOffsetTests`); tall windows
 keep the near-centre look, left docking and the Simulator are untouched.
 
+**The deeplink landed (2026-08-30, v1.1 release prep):** `AdbBridgeIntegrationTests` ran fully
+green against the live AVD — the well-formed deeplink reached NotchDemoAndroid and reported
+success, alongside the two failure-classification paths. Getting there surfaced a probe bug:
+`pm resolve-activity` without `--user` resolves against no user at all on API 35 and reports
+"No activity found" even with the app installed, so `EmulatorProbe.hasNotchDemoInstalled`
+false-negatived and silently skipped the success path. The gate now passes `--user current`.
+
 **Still flagged unverified:** AX behaviour during a drag of the Qt window, activation
 notifications for a nil-bundle-id process (if they don't fire, `lastActivatedAt` stays nil and
-arbitration falls to the iOS tie-break; the polling tier stays at 3Hz), the deeplink landing in
-NotchDemoAndroid, and the arbitration flip with both targets running. Every one of those assumptions is isolated behind a
+arbitration falls to the iOS tie-break; the polling tier stays at 3Hz), and the arbitration flip
+with both targets running. Every one of those assumptions is isolated behind a
 pure function, so a surprise changes one function, not the design. Also deliberately deferred,
 not dropped: the copy sweep beyond the load-bearing strings (onboarding, CoachMarkView,
 CollectionDialogs, MockData's coach-mark line, bug_report.yml's environment dropdown, the cask
