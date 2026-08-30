@@ -55,7 +55,7 @@ struct LoginOnSimTests {
             Issue.record("seed data has no free auth element")
             return
         }
-        var completion: ((SimctlBridge.Failure?) -> Void)?
+        var completion: ((DeeplinkFailure?) -> Void)?
         vm.deeplinkOpener = { _, done in completion = done }
 
         vm.loginOnSim(element)
@@ -77,7 +77,7 @@ struct LoginOnSimTests {
             return
         }
 
-        var completion: ((SimctlBridge.Failure?) -> Void)?
+        var completion: ((DeeplinkFailure?) -> Void)?
         vm.deeplinkOpener = { _, done in completion = done }
 
         vm.loginOnSim(element)
@@ -100,7 +100,7 @@ struct LoginOnSimTests {
         }
         let owningCollectionID = vm.activeCollectionID
 
-        var completion: ((SimctlBridge.Failure?) -> Void)?
+        var completion: ((DeeplinkFailure?) -> Void)?
         vm.deeplinkOpener = { _, done in completion = done }
 
         vm.loginOnSim(element)
@@ -122,11 +122,11 @@ struct LoginOnSimTests {
             Issue.record("seed data has no free auth element")
             return
         }
-        var completion: ((SimctlBridge.Failure?) -> Void)?
+        var completion: ((DeeplinkFailure?) -> Void)?
         vm.deeplinkOpener = { _, done in completion = done }
 
         vm.loginOnSim(element)
-        completion?(.noBootedSimulator)
+        completion?(.deviceNotAvailable(.iosSimulator))
         #expect(vm.selectedElement(id: element.id)?.claimedBy == nil)
     }
 

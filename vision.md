@@ -222,8 +222,9 @@ no real Accessibility API, and no real Simulator control. Building it natively m
   initially.
 - No deep simulator automation beyond firing one deeplink (phase 3) — no fixture seeding, no full
   device state reset, no multi-step scripted flows.
-- No Android/emulator support — Simulator (iOS) only, per all prototype references (`Simulator.app`,
-  `xcrun simctl`, iPhone 16 Pro chrome).
+- ~~No Android/emulator support — Simulator (iOS) only, per all prototype references
+  (`Simulator.app`, `xcrun simctl`, iPhone 16 Pro chrome).~~ *Superseded 2026-08-28 (§13.19):
+  the docking engine and the deeplink bridge both grew an Android emulator driver.*
 - No permission model beyond "everyone in a workspace sees/edits everything" — no roles, no
   per-group ACLs, no audit log in the prototype; if needed, treat as a v2 concern.
 
@@ -1125,6 +1126,85 @@ grant-lost-on-rebuild problem is now exclusive to source builds. And the bare
 `brew install notchboard` remains out of reach until the public repo meets homebrew-cask's
 notability numbers (75 stars, or 30 forks or watchers, higher for self-submission), which only
 started counting today.
+
+### 13.19 Android emulator support: docking + adb deeplink bridge (2026-08-28)
+
+The panel now docks to a standalone Android emulator window and "login on sim" fires through
+`adb shell am start -a android.intent.action.VIEW -d '<url>'` — the same experience, second
+platform, and the revision of a non-goal three documents had committed to (§10, ROADMAP, README).
+The user calls both platforms "simulators", so the feature keeps its name everywhere.
+
+**The core generalised instead of duplicating.** `SimulatorWindowTracker` became
+`DeviceWindowTracker(kind:)` — the second driver now exists, so the abstraction stopped being
+speculative (the `SyncTransport` precedent). The engine (adaptive 60/10/3Hz tiers, activation
+caching, off-main AX reads, equality-guarded writes) was platform-neutral already and survived
+untouched; everything platform-specific routes through the new `DeviceKind`. Likewise the process
+plumbing: `DeeplinkBridge` now owns the child-process run loop and the password redaction, with
+`SimctlBridge` and the new `AdbBridge` reduced to their tool-specific output classification, and
+one `DeeplinkFailure` replacing the per-bridge failure enums (no typealias shim — but note this is
+the first post-1.0 rename, so "pre-release" no longer justifies the next one by itself).
+
+**The Android facts the design stands on, all researched rather than observed** — no Android SDK
+on this machine, so this landed the way the room landed before its two-human test: implemented,
+tested pure, runtime-flagged. The standalone emulator is a bare qemu Mach-O with a **nil bundle
+id**; identity is the `qemu-system*` executable name (AltTab's shipped rule), and Android
+Studio's default since Flamingo embeds the emulator in the Running Devices tool window, where
+there is genuinely no window to dock to (documented prerequisite: untick that setting, or
+`emulator -avd Name`). The qemu process owns **several AX windows** (device window, frameless Qt
+toolbar, extended controls), so window choice is by the anchored title
+`Android Emulator - <avd>:<console_port>` — never by focus, which the toolbar can hold — through
+the pure `chooseWindowIndex`, with the console port doubling as the join key to the adb serial
+`emulator-<port>`. On the bridge side: `adb shell` re-joins its arguments for the device-side
+`sh`, so the URL is single-quoted for that second parse (an unquoted `&` truncates the intent at
+`user=`), `am start` can exit 0 while printing `Error: Activity not started…` to stdout (so the
+adb bridge captures stdout where simctl's goes to the null device), and adb is resolved through
+an explicit path list (`$ANDROID_HOME`, `$ANDROID_SDK_ROOT`, `~/Library/Android/sdk`, Homebrew,
+`/usr/local`) because a launchd GUI app has no meaningful PATH.
+
+**Arbitration and routing are two pure functions on AppDelegate.** With both a Simulator and an
+emulator on screen, `dockedKind` gives the panel to the host the user last clicked into (nil
+stamps read as distant past, full tie to iOS) — sticky by construction, and the loser takes over
+through the same path that already handles Simulator quitting. `deeplinkTarget` sends the login
+to the docked device, else the sole running one, else iOS. The view model stays tracker-ignorant:
+AppDelegate installs the router on `deeplinkOpener`, and the success toast dropped its "on
+simulator" claim (the consequence is visible on the docked window). The hotkey host set gained
+Android Studio (the role Xcode plays), the panel-level rule floats for either host — and still
+deliberately not for Xcode or Android Studio ("with Simulator only" holds). The panel's
+"must never observe the tracker" landmine left `NotchboardSceneView` entirely: it now takes an
+`isDeviceRunning` closure instead of a tracker.
+
+**Security posture: one exposure mirrored, one added.** The argv exposure is identical to
+simctl's and accepted the same way (DeeplinkBridge header). Android adds one of its own: API ≤ 32
+logs a custom-scheme intent's data URI verbatim to logcat, credentials included; API 33+ redacts
+to `scheme://host/...`. Documented (AdbBridge header, CLAUDE.md, USAGE), no runtime API-level
+probing.
+
+**Verification.** 321 tests in 65 suites; the new pure coverage is `DeviceKindTests`,
+`DeviceWindowSelectionTests` (the three-window shape with focus parked on the toolbar, in every
+order), `AdbBridgeTests` (quoting, discovery order, the exit-0 Error fixture) and
+`DockArbitrationTests`. `AdbBridgeIntegrationTests` is the fourth environment-gated suite
+(`EmulatorProbe`, resolving adb through the bridge's own discovery so the gate can't pass where
+the bridge would fail), with the success path additionally gated on `SampleApp/NotchDemoAndroid`
+— the new Gradle twin of NotchDemo — being installed. Phase 1 of the change was landed and
+verified as a pure refactor: every pre-existing test green with only mechanical updates.
+
+**First live-AVD contact (2026-08-30):** docking against a real emulator window works — the title
+match found the device window and the notch attached. It also surfaced the first real-world bug:
+the toolbar's control stack hangs ~515pt down the window's right flank, and the centre-placed
+notch parked itself on top of the Android nav buttons. Fix: `AppDelegate.collapsedNotchOffset` —
+a right-docked emulator notch grows its downward offset exactly enough to put its top just below
+`emulatorToolbarClearance` (measured, and pinned by `CollapsedNotchOffsetTests`); tall windows
+keep the near-centre look, left docking and the Simulator are untouched.
+
+**Still flagged unverified:** AX behaviour during a drag of the Qt window, activation
+notifications for a nil-bundle-id process (if they don't fire, `lastActivatedAt` stays nil and
+arbitration falls to the iOS tie-break; the polling tier stays at 3Hz), the deeplink landing in
+NotchDemoAndroid, and the arbitration flip with both targets running. Every one of those assumptions is isolated behind a
+pure function, so a surprise changes one function, not the design. Also deliberately deferred,
+not dropped: the copy sweep beyond the load-bearing strings (onboarding, CoachMarkView,
+CollectionDialogs, MockData's coach-mark line, bug_report.yml's environment dropdown, the cask
+description, the USAGE/docs sweep beyond the prerequisite blocks), and NotchDemoAndroid ships
+without a Gradle wrapper (nothing on this machine can generate the jar; its README says so).
 
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 

@@ -22,7 +22,7 @@ Open with ⌘, from the panel, or from the menu-bar item.
 
 If macOS puts the login-item registration in a pending state, a "Pending your approval in Login Items" row appears with a button that opens the right System Settings pane.
 
-### Simulator deeplink
+### Debug deeplink
 
 Scoped to the active collection.
 
@@ -61,7 +61,7 @@ That is what makes ⌃K an acceptable default at all, since it is `kill-line` in
 | Item                     | What it does                                                                                                   |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Toggle Expand / Collapse | Flips between the notch and the full panel                                                                     |
-| Show Panel (Undocked)    | Shows the panel free-floating and draggable, and outranks docking. The item then reads Dock to Simulator Again |
+| Show Panel (Undocked)    | Shows the panel free-floating and draggable, and outranks docking. The item then reads Dock Again |
 | Join Room with Invite    | Paste an invite line and a room password to join a teammate's room                                             |
 | Export Collection        | Writes the active collection to a password-protected `.notchboard` file                                        |
 | Import Collections       | Adds one or more files as new collections, destroying nothing                                                  |

@@ -97,7 +97,7 @@ Where the minutes actually go, and what replaces them:
 | One-click login | ✅ | A booted simulator, a URL handler in your app, the scheme set on the collection, and a `username` field |
 | Team room | ✅ | An MQTT 5 broker with retained messages, including a local `mosquitto` |
 | Physical iOS device | ⚠️ | Copy and paste only, `simctl` cannot reach a real device |
-| Android or emulators | ❌ | Not supported, and not planned |
+| Android emulator | ⚠️ | New: the emulator in its own window (not Android Studio's Running Devices tool window), plus `adb`. Not yet exercised on a live AVD |
 | Mac App Store build | ❌ | Impossible by design, the App Sandbox breaks docking |
 
 ## 🔧 Every action, and where it lives
@@ -105,7 +105,7 @@ Where the minutes actually go, and what replaces them:
 ### Menu bar
 
 - **`Toggle Expand / Collapse`** - Flips between the notch and the full panel
-- **`Show Panel (Undocked)`** - Shows the panel free-floating and draggable, and outranks docking. The same item then reads `Dock to Simulator Again`
+- **`Show Panel (Undocked)`** - Shows the panel free-floating and draggable, and outranks docking. The same item then reads `Dock Again`
 - **`Join Room with Invite`** - Paste an invite line and a room password to join a teammate's room
 - **`Export Collection`** - Writes the active collection to a password-protected `.notchboard` file
 - **`Import Collections`** - Adds one or more files as new collections, destroying nothing

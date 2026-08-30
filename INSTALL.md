@@ -183,8 +183,8 @@ Two things worth checking when the toggle keeps flipping back:
 The menu-bar item is the entry point for everything:
 
 - Toggle Expand / Collapse switches between the slim notch and the full panel.
-- Show Panel (Undocked) opens the panel free of the Simulator window, and changes to
-  "Dock to Simulator Again" while it is on. This is the fallback when Simulator is not running or
+- Show Panel (Undocked) opens the panel free of the device window, and changes to
+  "Dock Again" while it is on. This is the fallback when nothing dockable is running or
   Accessibility is not granted.
 - Join Room with Invite, Export Collection, Import Collections and Restore Snapshot.
 - Settings, also ⌘, from the panel.
@@ -199,6 +199,23 @@ use. Inside the panel, the plain ⌘K and ⌘N chords work as well.
 Simulator must be running for the docked presentation. The panel attaches to the right edge of the
 Simulator window by default, and Settings can move it to the left. Everything else about the app
 works without a simulator through the undocked panel.
+
+## The Android emulator (optional)
+
+Notchboard docks to a running Android emulator the same way, and "login on sim" then goes through
+`adb` instead of `simctl`. Two prerequisites:
+
+- The emulator must run in its own window. Android Studio's default embeds it in the Running
+  Devices tool window, where there is nothing to dock to. Untick Settings > Tools > Emulator >
+  "Launch in the Running Devices tool window" in Android Studio, or start it from a terminal with
+  `emulator -avd <Name>`.
+- `adb` must be installed. Notchboard looks for it at `$ANDROID_HOME/platform-tools/adb`,
+  `$ANDROID_SDK_ROOT/platform-tools/adb`, `~/Library/Android/sdk/platform-tools/adb`,
+  `/opt/homebrew/bin/adb` and `/usr/local/bin/adb`, in that order. It never consults `$PATH`,
+  which an app launched from Finder does not meaningfully have.
+
+With a Simulator and an emulator both on screen, the panel docks to whichever you last clicked,
+and the login follows the dock.
 
 ## Troubleshooting
 

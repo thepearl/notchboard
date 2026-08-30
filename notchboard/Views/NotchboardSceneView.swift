@@ -14,7 +14,11 @@ import SwiftUI
 struct NotchboardSceneView: View {
     @Bindable var viewModel: NotchboardViewModel
     @Bindable var onboarding: OnboardingViewModel
-    var tracker: SimulatorWindowTracker
+    /// Whether any device window is currently dockable. Injected as a closure so this view
+    /// never takes a SwiftUI dependency on a tracker, whose sub-second poll writes would
+    /// re-render the whole panel tree (~25% CPU, caught by profiling) — the deferred coach
+    /// mark is promoted by AppDelegate's reposition tick for the same reason.
+    let isDeviceRunning: () -> Bool
 
     @FocusState private var searchFocused: Bool
 
@@ -79,10 +83,6 @@ struct NotchboardSceneView: View {
             viewModel.updateSelfName(onboarding.name)
             persist()
         }
-        // Deliberately NOT observing the tracker here: its properties are rewritten by a
-        // sub-second poll, and a SwiftUI dependency on it re-rendered the whole panel tree
-        // several times per second (~25% CPU, caught by profiling). The deferred coach
-        // mark is promoted by AppDelegate's reposition tick instead.
     }
 
     private func persist() {
@@ -203,9 +203,9 @@ struct NotchboardSceneView: View {
 
     private func finishOnboarding() {
         onboarding.isPresented = false
-        // Reads false both when Simulator isn't running and when Accessibility was refused,
+        // Reads false both when no device is running and when Accessibility was refused,
         // which is exactly right: either way there is no window frame to dock against.
-        let canDock = tracker.isSimulatorRunning
+        let canDock = isDeviceRunning()
         // Coach mark now if Simulator is visible, deferred to its first appearance if not —
         // never silently dropped.
         viewModel.showCoachMark = canDock
@@ -240,11 +240,11 @@ struct NotchboardSceneView: View {
     let vm = NotchboardViewModel()
     let ob = OnboardingViewModel()
     ob.isPresented = false
-    return NotchboardSceneView(viewModel: vm, onboarding: ob, tracker: SimulatorWindowTracker())
+    return NotchboardSceneView(viewModel: vm, onboarding: ob, isDeviceRunning: { false })
         .frame(width: NBMetrics.panelWidth, height: NBMetrics.panelHeight)
 }
 
 #Preview("Onboarding") {
-    NotchboardSceneView(viewModel: NotchboardViewModel(), onboarding: OnboardingViewModel(), tracker: SimulatorWindowTracker())
+    NotchboardSceneView(viewModel: NotchboardViewModel(), onboarding: OnboardingViewModel(), isDeviceRunning: { false })
         .frame(width: 468, height: 470)
 }

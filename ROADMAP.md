@@ -17,6 +17,11 @@ rooms over MQTT joined with one pasted invite and one password.
 The room has passed a two-human test over a public broker on TLS. CI builds and tests every push to
 master and every pull request against it.
 
+Since 2026-08-28 the panel also docks to a standalone Android emulator window, and the same login
+button fires through `adb` when the emulator holds the dock. Implemented against researched
+emulator behaviour and covered by pure tests, but not yet exercised on a live AVD — vision.md
+§13.19 carries the flag and the list of what a first run must confirm.
+
 Since 2026-08-20, v1.0 is a notarised download on the
 [releases page](https://github.com/thepearl/notchboard/releases) and installs with
 `brew install --cask thepearl/tap/notchboard`. The Developer ID signature also means the
@@ -80,9 +85,6 @@ When two or three real teams ask for these, that is the signal. Until then the M
 is already the API spec, so the work is not wasted.
 
 ## Not planned
-
-No Android or emulator support. The docking mechanic reads Simulator.app's window frame and the
-login bridge is `xcrun simctl`, so both ends are iOS-specific.
 
 No deep simulator automation. Notchboard fires one deeplink. Seeding fixtures, resetting device
 state and scripting multi-step flows are a different tool's job.

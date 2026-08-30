@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:label="NotchDemo"
+        android:theme="@android:style/Theme.Material.Light">
+        <!-- singleTop + onNewIntent so a second login switches accounts in place instead
+             of stacking a new activity per deeplink. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The Notchboard integration: notchdemo://debug/login?user=…&pass=…
+                 fired via `adb shell am start -a android.intent.action.VIEW -d <url>`. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="notchdemo"
+                    android:host="debug"
+                    android:path="/login" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
