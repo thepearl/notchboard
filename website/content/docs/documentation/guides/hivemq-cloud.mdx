@@ -72,11 +72,15 @@ On the **Overview** tab, the address you want is the **TLS MQTT URL**, the one e
 
 ![The overview tab with the connection details and the TLS MQTT URL](../assets/hivemq-connection-details.png)
 
-Notchboard takes it in the `mqtts://` form with your broker username in front:
+<Callout type="warn">
+Notchboard takes it with `mqtts://` in front. Copy the TLS MQTT URL and prefix it, nothing else:
 
 ```
-mqtts://ghazi@YOUR-BROKER-ID.s1.eu.hivemq.cloud:8883
+mqtts://YOUR-BROKER-ID.s1.eu.hivemq.cloud:8883
 ```
+
+The username does not go in the address. The room setup dialog has its own field for it.
+</Callout>
 
 The plain MQTT URL is the unencrypted endpoint and Notchboard refuses it off localhost. The websocket URL is the corporate-firewall fallback, not the normal case.
 </Step>
@@ -88,11 +92,15 @@ The plain MQTT URL is the unencrypted endpoint and Notchboard refuses it off loc
 <Step>
 #### Set up the team room
 
-In Notchboard, open the ▾ menu next to the collection name and pick **set up team room**. Fill in the broker address from the previous step, a room name, the broker username and password from Access Management, and a room password (Generate sits next to it, and the password is never shown again, so copy it now).
+In Notchboard, open the ▾ menu next to the collection name and pick **set up team room**. Fill in, top to bottom: the `mqtts://` address from the previous step, a room name, the broker username and password you created in Access Management, and a room password (Generate sits next to it, and the password is never shown again, so copy it now).
 
-![The team room setup dialog refusing an address that does not parse](../assets/room-setup-hivemq.png)
+![The team room setup dialog with the broker address, room name, broker account and generated room password](../assets/room-setup-hivemq.png)
 
-The address is validated before anything connects. The screenshot shows the dialog refusing a malformed one, which is what you get if a placeholder or a stray character is still in the field.
+The address is validated as you fill it in, before anything connects.
+
+The room connects as soon as it is created. The dot beside the wordmark goes green, the footer reads live, and the panel confirms the room by name.
+
+![The panel right after creating the room, connected and live](../assets/room-connected-live.png)
 </Step>
 
 <Step>
@@ -108,20 +116,12 @@ The address is validated before anything connects. The screenshot shows the dial
 
 They pick **join with an invite** from their ▾ menu, paste the invite, and type the room password. That is the whole join. The broker account travels inside the invite as ciphertext, so they never see or type it.
 
-![The join dialog waiting for an invite and the room password](../assets/join-room-dialog.png)
+![The join dialog waiting for an invite and the room password](../assets/join-room-empty.png)
 
 ![The join dialog with the invite pasted and the room password entered](../assets/join-room-filled.png)
 
-On first connect their collection adopts the room's catalogue, with their local copy snapshotted first.
+On first connect their collection adopts the room's catalogue, with their local copy snapshotted first. From here the room is live: every edit, deletion and in-use mark flows both ways as it happens, and the header counts who is online.
 
-![The panel after joining, showing the catalogue adopted from the room](../assets/room-joined-adopted.png)
-</Step>
-
-<Step>
-#### Live
-
-The dot beside the wordmark goes green, the footer says live, and the header counts who is online. From here every edit, deletion and in-use mark flows both ways as it happens.
-
-![The panel connected to the room and live](../assets/room-connected-live.png)
+![The panel after joining, showing the catalogue adopted from the room and the room connected](../assets/room-joined-adopted.png)
 </Step>
 </Steps>
