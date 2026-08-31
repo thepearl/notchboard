@@ -67,6 +67,78 @@ Plaintext `mqtt://` to anything other than `localhost`, `127.0.0.1` or `::1` is 
 
 TLS trust comes from the system store and cannot be customised, so a self-hosted broker with a self-signed or private-CA certificate does not work.
 
+## Hosting your own broker
+
+A broker you run yourself is the strongest form of the privacy promise. The relay sees only ciphertext either way, but on your own machine even the topic names, message sizes and timing stay with you.
+
+### On one Mac, to try it out
+
+The local mosquitto above is the whole setup. No account, no TLS, no configuration file. It accepts connections from that Mac only, so it proves the room works rather than serving a team.
+
+### For the team
+
+Off localhost the app accepts `mqtts://` only, and the certificate has to be one macOS already trusts. In practice that means:
+
+* The broker needs a real domain name and a certificate from a public CA such as Let's Encrypt. There is no override for a self-signed certificate.
+* The machine does not have to be reachable from the internet. A DNS record pointing at a LAN address, with a certificate issued through a DNS-01 challenge, serves an office-only broker fine.
+
+Mosquitto takes its settings from one plain-text file, read once at startup. These are file contents, not commands. Save them as `mosquitto.conf` (`"$(brew --prefix)"/etc/mosquitto/mosquitto.conf` on macOS, `/etc/mosquitto/conf.d/notchboard.conf` on Linux), with the certificate paths and domain replaced by your own. This minimal file meets everything in the requirements list above:
+
+```
+# mosquitto.conf, the settings file mosquitto reads when it starts up
+listener 8883
+certfile /etc/letsencrypt/live/broker.example.com/fullchain.pem
+keyfile /etc/letsencrypt/live/broker.example.com/privkey.pem
+password_file /etc/mosquitto/passwd
+allow_anonymous false
+persistence true
+```
+
+Create the account the team shares:
+
+```bash
+mosquitto_passwd -c /etc/mosquitto/passwd team
+```
+
+The broker address is then `mqtts://team@broker.example.com:8883`. Whoever creates the room types the account password once, and it reaches every joiner inside the invite, sealed under the room key.
+
+Two lines in that configuration earn their place:
+
+* `persistence true`, because the retained messages are the room's memory. Without it, a broker restart forgets the catalogue it was holding for the next joiner.
+* `allow_anonymous false`, because anyone able to subscribe can collect ciphertext and grind the room password offline. The account is your outer wall.
+
+No topic ACL is needed beyond the account. If you add one anyway, the account must be able to publish and subscribe on `nb/#`.
+
+{% hint style="info" %}
+Any mosquitto a current package manager installs speaks MQTT 5. Without a configuration file, mosquitto listens on localhost only, which is why the try-it-out case needs nothing and the team case needs the file.
+{% endhint %}
+
+### A worked example: the CI Mac mini
+
+A common shape: the team already keeps a Mac mini in the office as a self-hosted CI runner, and wants teammates anywhere in the world in the same room. The mini is a good fit. The room's entire state is a few hundred small retained messages and live traffic is one message per edit, so the broker is a rounding error next to a CI job.
+
+On the mini:
+
+```bash
+brew install mosquitto
+brew services start mosquitto
+```
+
+with the configuration above in `"$(brew --prefix)"/etc/mosquitto/mosquitto.conf`. A CI box is normally already set to never sleep, which is the other thing a broker needs.
+
+To reach it from outside, two routes:
+
+* Forward port 8883 on the router to the mini and point a domain at the office IP, with a dynamic-DNS updater if that IP can change. Everyone joins as `mqtts://team@broker.example.com:8883`. This is the proven route.
+* No open ports at all: a Cloudflare Tunnel in front of a mosquitto WebSocket listener, joined as `wss://team@broker.example.com`. The tunnel's edge certificate is publicly trusted, so the system-store rule is satisfied. This route is supported but has not yet been exercised by a real team, so try it before the team depends on it.
+
+The certificate is the part that needs care:
+
+* Issue it with a DNS-01 challenge (certbot or lego against your DNS provider's API). That needs no inbound port 80, so it works behind NAT before any forwarding is set up.
+* Automate renewal, and reload mosquitto in the renewal hook. A broker serving an expired certificate looks to every teammate like a dot that stays red, with nothing better to go on.
+* Make sure the mosquitto process can read the renewed key file. Certbot's default directory layout is stricter than mosquitto's user.
+
+Exposing 8883 to the internet is acceptable here because of what the broker holds: ciphertext under the room key, nothing else. The broker account is the outer wall that keeps strangers from collecting that ciphertext to grind the room password offline, so give the account a strong password. It is typed once and travels sealed inside invites anyway.
+
 ## Steps
 
 <Steps>
