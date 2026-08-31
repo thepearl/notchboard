@@ -1,0 +1,127 @@
+---
+title: 'A team room on HiveMQ Cloud'
+icon: Cloud
+description: >-
+  The recommended broker setup, walked end to end with screenshots: a free
+  HiveMQ Cloud broker, one account, one room.
+---
+
+This is the path we recommend for most teams. Nothing to install, nothing to keep awake, TLS on by default, and a free tier that a room will never outgrow. The whole thing is about five minutes, and every screenshot below comes from one real run of it.
+
+If you would rather run the broker yourself, that path is documented in [team rooms](./team-rooms.mdx) under hosting your own broker. Everything else about rooms (invites, presence, what syncs) also lives there. This page is only the broker and the first connection.
+
+<Callout type="success">
+HiveMQ never sees your data. Every payload Notchboard publishes is ciphertext under the room key, so the broker relays bytes it cannot read. The [security model](./security-model.mdx) has the full picture.
+</Callout>
+
+## Create the broker
+
+<Steps>
+<Step>
+#### Sign up and start the wizard
+
+Create a free account at [console.hivemq.cloud](https://console.hivemq.cloud). A fresh account lands on an empty network page. Pick **Get Broker or Edge**.
+
+![HiveMQ's empty network page with the Get Broker or Edge button](../assets/hivemq-connect-empty.png)
+
+Choose **Deploy a new broker**, then **HiveMQ Cloud**, the option where HiveMQ hosts and manages it.
+
+![The get started dialog with Deploy a new broker selected](../assets/hivemq-get-started.png)
+
+![Choosing HiveMQ Cloud as the way to run the broker](../assets/hivemq-choose-cloud.png)
+</Step>
+
+<Step>
+#### Pick the free Serverless plan
+
+The Serverless plan is free, needs no credit card, and covers everything a room uses: MQTT 5, TLS, retained messages, and basic authorisation.
+
+![The plan chooser with Serverless selected](../assets/hivemq-plan-serverless.png)
+
+Confirm with **Create Serverless Broker**.
+
+![The Serverless summary with the create button](../assets/hivemq-create-serverless.png)
+
+A few seconds later the broker shows as running.
+
+![The network list showing the new broker running](../assets/hivemq-broker-running.png)
+
+<Callout type="info">
+The free tier's limits (100 connections, 10 GB of traffic a month) dwarf what a room uses. The room's whole state is a few hundred small retained messages, and live traffic is one message per edit.
+</Callout>
+</Step>
+
+<Step>
+#### Create the broker account
+
+Open the broker and go to **Access Management**. A new broker has no credentials, and it refuses anonymous connections, so this step is not optional.
+
+![Access Management on a fresh broker, no credentials configured](../assets/hivemq-access-management.png)
+
+Pick **Add New**, choose a username, set Permission Type to **Publish and Subscribe**, and give it a strong password. This is the account the whole team shares, and only the room creator ever types it.
+
+![The credentials form filled in with Publish and Subscribe permission](../assets/hivemq-add-credentials.png)
+
+![The credential listed after adding it](../assets/hivemq-credentials-added.png)
+</Step>
+
+<Step>
+#### Copy the address
+
+On the **Overview** tab, the address you want is the **TLS MQTT URL**, the one ending in `:8883`.
+
+![The overview tab with the connection details and the TLS MQTT URL](../assets/hivemq-connection-details.png)
+
+Notchboard takes it in the `mqtts://` form with your broker username in front:
+
+```
+mqtts://ghazi@YOUR-BROKER-ID.s1.eu.hivemq.cloud:8883
+```
+
+The plain MQTT URL is the unencrypted endpoint and Notchboard refuses it off localhost. The websocket URL is the corporate-firewall fallback, not the normal case.
+</Step>
+</Steps>
+
+## Create the room
+
+<Steps>
+<Step>
+#### Set up the team room
+
+In Notchboard, open the ▾ menu next to the collection name and pick **set up team room**. Fill in the broker address from the previous step, a room name, the broker username and password from Access Management, and a room password (Generate sits next to it, and the password is never shown again, so copy it now).
+
+![The team room setup dialog refusing an address that does not parse](../assets/room-setup-hivemq.png)
+
+The address is validated before anything connects. The screenshot shows the dialog refusing a malformed one, which is what you get if a placeholder or a stray character is still in the field.
+</Step>
+
+<Step>
+#### Copy the invite and share it
+
+▾ menu, then **copy room invite**. Paste the invite line into your team chat, and send the room password another way, out of band.
+
+![The panel confirming the invite was copied](../assets/room-invite-copied.png)
+</Step>
+
+<Step>
+#### A teammate joins
+
+They pick **join with an invite** from their ▾ menu, paste the invite, and type the room password. That is the whole join. The broker account travels inside the invite as ciphertext, so they never see or type it.
+
+![The join dialog waiting for an invite and the room password](../assets/join-room-dialog.png)
+
+![The join dialog with the invite pasted and the room password entered](../assets/join-room-filled.png)
+
+On first connect their collection adopts the room's catalogue, with their local copy snapshotted first.
+
+![The panel after joining, showing the catalogue adopted from the room](../assets/room-joined-adopted.png)
+</Step>
+
+<Step>
+#### Live
+
+The dot beside the wordmark goes green, the footer says live, and the header counts who is online. From here every edit, deletion and in-use mark flows both ways as it happens.
+
+![The panel connected to the room and live](../assets/room-connected-live.png)
+</Step>
+</Steps>
