@@ -25,6 +25,7 @@ body:
       options:
         - Homebrew cask
         - Release zip
+        - Updated in-app from an earlier release
         - Built from source
     validations:
       required: true
@@ -32,8 +33,8 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: App version, macOS version, and Xcode version if you built from source.
-      placeholder: Notchboard 1.0, macOS 26.1
+      description: App version (shown in Settings under Updates), macOS version, and Xcode version if you built from source.
+      placeholder: Notchboard 1.2, macOS 26.1
     validations:
       required: true
   - type: dropdown

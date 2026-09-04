@@ -21,6 +21,16 @@ Open with ⌘, from the panel, or from the menu-bar item.
 
 If macOS puts the login-item registration in a pending state, a "Pending your approval in Login Items" row appears with a button that opens the right System Settings pane.
 
+### Updates
+
+| Setting                         | What it does                                                                                                   | Default |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| Installed                       | The version you are running                                                                                    |         |
+| Status                          | `not checked yet`, `checking…`, `up to date · checked 3 h ago`, `<version> available`, or why the check failed |         |
+| Check for updates automatically | Checks GitHub once a day. Off stops the check entirely                                                         | On      |
+
+The **Check for Updates** button runs a check now, and reads **Update to \<version>** once one is known. A copy built from source shows `built from source · update by rebuilding` in place of the status, the toggle and the button.
+
 ### Debug deeplink
 
 Scoped to the active collection.
@@ -65,8 +75,11 @@ That is what makes ⌃K an acceptable default at all, since it is `kill-line` in
 | Export Collection        | Writes the active collection to a password-protected `.notchboard` file                                        |
 | Import Collections       | Adds one or more files as new collections, destroying nothing                                                  |
 | Restore Snapshot         | Replaces all collections from an encrypted local snapshot                                                      |
+| Check for Updates        | Checks GitHub for a newer release now. Reads Update to \<version> while one is waiting, and is greyed out during a check |
 | Settings                 | Opens the settings window                                                                                      |
 | Quit Notchboard          | Quits, releasing the global chords and flushing state to disk                                                  |
+
+The greyed-out header item reads `Notchboard <version>`, and the menu-bar icon carries a small dot while an update is waiting.
 
 ## The collection menu
 

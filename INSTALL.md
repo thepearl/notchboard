@@ -22,12 +22,28 @@ the internet, and nothing worse. Requirements are macOS 14.0 (Sonoma) or later a
 presentation, Xcode's Simulator.app with at least one iOS runtime. If that is you, skip ahead to
 [First run](#first-run).
 
-Updates keep the Accessibility grant, because every release carries the same Developer ID identity.
-The self-built copies the rest of this page describes are the ones that lose it on every rebuild.
+Notchboard checks GitHub for a newer release once a day. When one exists, a dot appears on the
+menu-bar icon and Settings shows the version, and you install it from the menu bar or from Settings
+when it suits you. Updates keep the Accessibility grant, because every release carries the same
+Developer ID identity. The self-built copies the rest of this page describes never check for
+updates, and they are the ones that lose the grant on every rebuild.
 
 A bare `brew install notchboard` needs acceptance into homebrew-cask, whose notability criteria
 this project does not meet yet. [the releasing guide](website/content/docs/documentation/releasing.mdx) has the detail, along with
 how a release is produced.
+
+## Updating
+
+The app tells you itself: a dot on the menu-bar icon, the version in Settings under Updates, and
+Check for Updates in the menu bar or the button in Settings to install it. Homebrew still works
+alongside:
+
+```bash
+brew upgrade --cask thepearl/tap/notchboard
+```
+
+After an in-app update, `brew list --versions` lags behind until `brew upgrade --greedy-auto-updates`
+refreshes Homebrew's record. Nothing is wrong in the meantime.
 
 ## Requirements for building from source
 
@@ -39,10 +55,11 @@ setting rather than rejecting it, so the build fails on the first implicitly mai
 initialiser instead of on the setting itself. CI pins the `macos-26` image for that reason, since
 `macos-latest` still points at macOS 15. On an older Xcode the failure is loud, not subtle.
 
-A network connection for the first build. The project has one Swift package dependency,
-[mqtt-nio](https://github.com/swift-server-community/mqtt-nio) 2.13.0, which pulls in swift-nio,
+A network connection for the first build. The project has two Swift package dependencies.
+[mqtt-nio](https://github.com/swift-server-community/mqtt-nio) 2.13.0 pulls in swift-nio,
 swift-nio-ssl, swift-nio-transport-services, swift-log, swift-atomics, swift-collections and
-swift-system. Exact revisions are pinned in
+swift-system. [Sparkle](https://github.com/sparkle-project/Sparkle) 2.9.6 is the updater, a
+prebuilt binary framework. Exact revisions are pinned in
 `notchboard.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. Later builds work
 offline once the packages are resolved.
 
@@ -187,6 +204,7 @@ The menu-bar item is the entry point for everything:
   "Dock Again" while it is on. This is the fallback when nothing dockable is running or
   Accessibility is not granted.
 - Join Room with Invite, Export Collection, Import Collections and Restore Snapshot.
+- Check for Updates, which reads `Update to <version>` once one is waiting.
 - Settings, also ⌘, from the panel.
 - Quit Notchboard.
 
@@ -237,6 +255,13 @@ The app was rebuilt and the permission stopped applying. Copy the new build over
 Accessibility with the minus button, then relaunch and grant again. Running from `/Applications`
 rather than DerivedData keeps this from repeating.
 
+Check for Updates says to move Notchboard to Applications. The app is running from a download
+folder or from a disk image, where an update cannot be installed in place. Quit it, drag
+`notchboard.app` into Applications with the Finder, launch it from there and try again.
+
+The Updates section in Settings says built from source. A copy you built yourself never checks for
+updates. Pull the latest source and rebuild to update.
+
 "Your catalogue couldn't be opened" at launch. The state file could not be read, so it was moved
 aside to `~/Library/Application Support/Notchboard/state.json.corrupt` and setup starts fresh. The
 alert offers Show in Finder. The original file is intact, so nothing is lost yet. If you had been
@@ -268,7 +293,7 @@ bundle install
 bundle exec fastlane test
 ```
 
-The suite is green on a clean clone with nothing else installed. Three suites skip themselves when
+The suite is green on a clean clone with nothing else installed. Four suites skip themselves when
 their environment is missing, rather than failing, so a fresh machine does not get a red run for
 something it was never set up to do.
 
@@ -292,6 +317,10 @@ open -a Simulator
 
 That suite exercises the deeplink bridge for real. `SampleApp/NotchDemo` is a small app that
 registers the `notchdemo://` scheme for it to fire at, with its own README.
+
+The fourth needs a running Android emulator, in its own window rather than embedded in Android
+Studio (`emulator -avd <Name>`, as step 3 above describes). With one up, `AdbBridgeIntegrationTests`
+runs the same deeplink path through `adb` against `SampleApp/NotchDemoAndroid`.
 
 ## Uninstalling
 

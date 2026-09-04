@@ -1,9 +1,14 @@
 name: Cask checksum
 
 # The tap's cask pins the sha256 of the release zip, and a stale pin fails every
-# `brew install` loudly on a user's machine. This job cross-checks the pin in
-# thepearl/homebrew-tap against the asset actually attached to the latest GitHub
-# release, so a forgotten tap bump surfaces here first.
+# `brew install` loudly on a user's machine. The appcast attached to the same release
+# is what every installed copy reads to find an update, and a wrong version, URL or
+# length there fails silently instead: the update never arrives. This job cross-checks
+# both artefacts against the zip actually attached to the latest GitHub release, the pin
+# in thepearl/homebrew-tap and the appcast's description of the zip, and then the
+# releases/latest redirector that SUFeedURL in every installed copy goes through
+# (vision.md §13.20). A forgotten tap bump or a release published without its feed
+# surfaces here first.
 on:
   release:
     types: [published]
@@ -11,7 +16,7 @@ on:
 
 jobs:
   verify:
-    name: Verify tap pin
+    name: Verify tap pin and appcast
     runs-on: ubuntu-latest
     steps:
       - name: Compare the tap cask against the latest release asset
@@ -41,3 +46,54 @@ jobs:
             exit 1
           fi
           echo "Tap pin matches the release."
+          {
+            echo "TAG=$tag"
+            echo "VERSION=$version"
+          } >> "$GITHUB_ENV"
+
+      # Sparkle acts on three things in the enclosure: the version it offers, the URL it
+      # downloads and the byte length it checks the download against. Each is compared
+      # with the zip that is actually attached, since the appcast was generated from a
+      # local copy and any re-zip after that point would leave it describing a file that
+      # no longer exists.
+      - name: Compare the appcast against the latest release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release download "$TAG" --repo thepearl/notchboard --pattern appcast.xml --output appcast.xml; then
+            echo "::error::${TAG} has no appcast.xml asset. Installed copies read that file to find updates, so this release is invisible to them."
+            exit 1
+          fi
+          zip_length=$(stat -c%s release.zip)
+          # generate_appcast writes the version as a child element of the item, and Sparkle
+          # also reads it as an enclosure attribute, so both spellings pass.
+          if ! grep -qE "sparkle:shortVersionString(=\"|>)${VERSION}(\"|<)" appcast.xml; then
+            echo "::error::The appcast attached to ${TAG} does not carry sparkle:shortVersionString ${VERSION}. Its version drifted from the tag."
+            exit 1
+          fi
+          if ! grep -qF "releases/download/${TAG}/notchboard-${VERSION}.zip\"" appcast.xml; then
+            echo "::error::The appcast attached to ${TAG} does not point at releases/download/${TAG}/notchboard-${VERSION}.zip. Its enclosure URL drifted from the asset."
+            exit 1
+          fi
+          if ! grep -qF "length=\"${zip_length}\"" appcast.xml; then
+            echo "::error::The appcast attached to ${TAG} does not carry length=\"${zip_length}\", the byte size of the attached zip. Sparkle refuses a download whose size differs."
+            exit 1
+          fi
+          echo "Appcast describes the release asset."
+
+      # SUFeedURL in every installed copy is the releases/latest redirector, not a
+      # versioned asset, so a release published without --latest, or one that lost its
+      # appcast, would leave every copy reading an old feed or none at all.
+      - name: Check the latest-release redirector
+        run: |
+          set -euo pipefail
+          status=$(curl -sSIL https://github.com/thepearl/notchboard/releases/latest/download/appcast.xml \
+            | grep -i '^HTTP/' | tail -n 1 | tr -d '\r')
+          case "$status" in
+            *" 200"*) echo "releases/latest/download/appcast.xml resolves (${status})." ;;
+            *)
+              echo "::error::releases/latest/download/appcast.xml does not end in HTTP 200 (last status line: '${status}'). The latest release has no appcast, or is not marked latest."
+              exit 1
+              ;;
+          esac

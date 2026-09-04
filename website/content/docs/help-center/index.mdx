@@ -17,9 +17,13 @@ brew install --cask thepearl/tap/notchboard
 
 Or download `notchboard-<version>.zip` from the latest GitHub release, unzip it, and drag `notchboard.app` into Applications. Both routes give you the same signed and notarised build, so the first launch is a double click. Building from source is covered on the [installation page](../documentation/getting-started/installation.mdx).
 
+### How do I update?
+
+Notchboard checks GitHub once a day. When a newer release exists, a small dot appears on the menu-bar icon and Settings shows the version under Updates. Install it whenever it suits you, from Check for Updates in the menu bar or from the button in Settings, both of which read Update to \<version> while one is waiting. Homebrew users can also run `brew upgrade --cask thepearl/tap/notchboard`.
+
 ### Does updating through Homebrew keep the Accessibility permission?
 
-Yes. Every release is signed with the same Developer ID identity, so macOS treats each update as the same app and the grant survives. A copy you build yourself is signed ad hoc, which makes every rebuild a different app as far as macOS is concerned, so a self-built copy loses the grant on each rebuild and you re-add it in System Settings.
+Yes. Every release is signed with the same Developer ID identity, so macOS treats each update as the same app and the grant survives. The in-app update keeps it too, for the same reason. A copy you build yourself is signed ad hoc, which makes every rebuild a different app as far as macOS is concerned, so a self-built copy loses the grant on each rebuild and you re-add it in System Settings.
 
 ### What does Notchboard cost?
 
@@ -69,7 +73,7 @@ Any standard MQTT 5 broker, from a local mosquitto to a free hosted tier. TLS is
 
 ### Does Notchboard have a server?
 
-No. There is no backend at all. The broker you choose is the only server involved, and it only relays ciphertext it cannot read. The [security model](../documentation/guides/security-model.mdx) explains what the broker operator can and cannot see.
+No. There is no backend at all, and nothing of ours runs anywhere. Rooms relay ciphertext through the broker you choose, which cannot read it. The update check reads GitHub's public releases page once a day, and Settings has the switch that turns it off. The [security model](../documentation/guides/security-model.mdx) explains what the broker operator can and cannot see, and what GitHub sees.
 
 ### What happens to my collection when I join an existing room?
 

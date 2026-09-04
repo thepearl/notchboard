@@ -3,6 +3,24 @@ title: 'Changelog'
 description: Every Notchboard release, newest first.
 ---
 
+{/*
+  Contract for every entry. The heading is `## <MARKETING_VERSION> (<date>)`, with the version
+  exactly as the project declares it. The body is plain Markdown only, no MDX components. The
+  release workflow extracts the section for the tagged version as the GitHub release body and as
+  the in-app release notes, and strips the closing "Full details" line.
+*/}
+
+## 1.2 (5 September 2026)
+
+Notchboard now updates itself.
+
+* Once a day it checks GitHub for a newer release. When one exists, a small dot appears on the menu-bar icon and Settings shows the version under Updates. Nothing pops up and nothing interrupts you.
+* Install it from the menu bar or from Settings when it suits you. The update keeps the Accessibility permission and your Keychain items, and `brew upgrade --cask thepearl/tap/notchboard` still works alongside it.
+* If you installed 1.1 with Homebrew, `brew upgrade --cask thepearl/tap/notchboard` brings you this release. From here on, the app tells you itself.
+* A copy built from source never checks for updates. Rebuild to update.
+
+Full details on the [GitHub release](https://github.com/thepearl/notchboard/releases/tag/v1.2).
+
 ## 1.1 (30 August 2026)
 
 Android emulator support: the same experience, second platform.

@@ -31,7 +31,7 @@ private enum PanelContentMode: Equatable {
     case fallbackPanel
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var panel: NSPanel!
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem?
@@ -43,6 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The room coordinator (vision.md §14.2). Created here — never in a view model's
     /// init — so no test ever opens a socket, the same rule the tracker follows.
     private var syncEngine: SyncEngine?
+    /// Quiet Sparkle updates (vision.md §13.20). Created here behind the test guard like the
+    /// sync engine; a self-built copy gets a centre with no driver (see BuildProvenance).
+    private var updates: UpdateCenter!
+    /// "Check for Updates" / "Update to x": retitled from the tick, like `fallbackMenuItem`.
+    private var updateMenuItem: NSMenuItem?
+    /// Mirrors `updates.showsIndicator` so the status-item image is swapped on change only.
+    private var statusItemShowsDot = false
 
     private var repositionTimer: Timer?
     private var lastContentMode: PanelContentMode?
@@ -112,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         setUpSyncEngine(for: viewModel)
+        setUpUpdateCenter()
         setUpPanel()
         setUpStatusItem()
         installGlobalShortcuts()
@@ -184,6 +192,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Sparkle installs by sending a quit event and waiting for the process to exit, and the
+    /// cask's `uninstall quit:` does the same. The room goodbye (retained offline presence, then
+    /// DISCONNECT) is published from a task the transport spawns, so returning straight away lets
+    /// the process exit with the goodbye still in flight and teammates see this Mac's in-use
+    /// marks held until the broker's will timeout. Hold the quit for as long as the flush
+    /// takes, capped so a dead broker can never wedge a quit.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !Self.isRunningTests, let syncEngine, syncEngine.hasConnectedSessions else {
+            return .terminateNow
+        }
+        syncEngine.sleepAll()
+        Task { @MainActor in
+            await syncEngine.drainAll(cap: Self.terminationDrainCap)
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    private static let terminationDrainCap: Duration = .seconds(1)
+
     func applicationWillTerminate(_ notification: Notification) {
         guard !Self.isRunningTests else { return }
         // Hand the chords back explicitly rather than relying on process teardown.
@@ -252,6 +280,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The updater's init reads only our own bundle and its signature; `start()` is where
+    /// Sparkle schedules its first quiet check. Nothing here runs under test (the guard above),
+    /// so no test process ever opens a socket to GitHub.
+    private func setUpUpdateCenter() {
+        let provenance = BuildProvenance.current()
+        let driver: UpdateDriver? = provenance.isSelfBuilt ? nil : SparkleUpdateDriver()
+        let center = UpdateCenter(provenance: provenance, driver: driver)
+        updates = center
+        center.start()
+    }
+
     private static func makeViewModels() -> (NotchboardViewModel, OnboardingViewModel) {
         let viewModel = NotchboardViewModel()
         let onboarding = OnboardingViewModel()
@@ -296,14 +335,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            let image = NSImage(systemSymbolName: "square.righthalf.filled", accessibilityDescription: "Notchboard")
-            image?.isTemplate = true
-            button.image = image
+            button.image = StatusItemBadge.plain
         }
 
         let menu = NSMenu()
 
-        let header = NSMenuItem(title: "Notchboard", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: "Notchboard \(updates.installedVersion)", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -320,6 +357,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(makeItem("Import Collections", #selector(importCollectionsFromMenu), key: ""))
         menu.addItem(makeItem("Restore Snapshot", #selector(restoreSnapshotFromMenu), key: ""))
         menu.addItem(.separator())
+        // Reads "Update to x" while one is waiting (retitled from the tick); enabled through
+        // validateMenuItem because NSMenu's auto-enabling would overwrite a written isEnabled.
+        let updateItem = makeItem(updates.actionTitle, #selector(checkForUpdatesFromMenu), key: "")
+        menu.addItem(updateItem)
+        updateMenuItem = updateItem
         menu.addItem(makeItem("Settings", #selector(openSettingsFromMenu), key: ","))
         menu.addItem(.separator())
         menu.addItem(makeItem("Quit Notchboard", #selector(quitFromMenu), key: "q"))
@@ -336,6 +378,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleExpandedFromMenu() {
         viewModel.toggleExpanded()
+    }
+
+    /// Re-focuses the update Sparkle was asked not to show, or runs a fresh check. Either way
+    /// Sparkle's own dialog reports the outcome, so nothing here toasts.
+    @objc private func checkForUpdatesFromMenu() {
+        updates.checkForUpdates()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdatesFromMenu) {
+            return updates.canCheck
+        }
+        return true
     }
 
     @objc private func joinRoomWithInviteFromMenu() {
@@ -460,7 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let view = SettingsView(viewModel: viewModel, onReplayOnboarding: { [weak self] in
+        let view = SettingsView(viewModel: viewModel, updates: updates, onReplayOnboarding: { [weak self] in
             guard let self else { return }
             // Replaying is not a tour. Step 3 applies a starting point, so finishing it with
             // the default choice loads the sample catalogue over the active collection and
@@ -558,7 +613,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// that tick.
     private func syncPanelLevel() {
         guard panel != nil else { return }
-        let shouldFloat = onboarding.isPresented || viewModel.fallbackPanelVisible || dockHostOrSelfIsFrontmost
+        // Sparkle's dialog is a normal-level window of ours: while it is up the panel yields,
+        // or its Install button could sit under a floating (and, during onboarding, centred) panel.
+        let shouldFloat = !updates.isPresentingUpdateUI
+            && (onboarding.isPresented || viewModel.fallbackPanelVisible || dockHostOrSelfIsFrontmost)
         let level: NSWindow.Level = shouldFloat ? .floating : .normal
         guard panel.level != level else { return }
         panel.level = level
@@ -571,6 +629,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
         return DeviceKind.androidEmulator.matches(app)
+    }
+
+    /// The menu title and the icon dot follow the update centre, from the same tick that
+    /// retitles the fallback item and with the same equality guards.
+    private func syncUpdateAffordances() {
+        let title = updates.actionTitle
+        if updateMenuItem?.title != title { updateMenuItem?.title = title }
+        let showsDot = updates.showsIndicator
+        guard showsDot != statusItemShowsDot else { return }
+        statusItemShowsDot = showsDot
+        statusItem?.button?.image = showsDot ? StatusItemBadge.withDot : StatusItemBadge.plain
     }
 
     /// Claims the global chords only while they can be acted on *and* the user is in the
@@ -735,6 +804,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // title written only by the menu handler would have gone stale.
         let fallbackTitle = viewModel.fallbackPanelVisible ? "Dock Again" : "Show Panel (Undocked)"
         if fallbackMenuItem?.title != fallbackTitle { fallbackMenuItem?.title = fallbackTitle }
+        syncUpdateAffordances()
 
         // Onboarding always shows regardless of whether Simulator happens to be running yet —
         // setup shouldn't require Simulator to already be open. Positioned once on entry

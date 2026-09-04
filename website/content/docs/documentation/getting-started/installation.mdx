@@ -34,7 +34,13 @@ If the toggle will not stick, which happens on some managed Macs, click **contin
 
 ## Updating
 
-Releases keep the Accessibility grant, because every release carries the same signing identity. A self-built copy loses the grant on each rebuild, and you grant it again.
+Notchboard checks GitHub for a newer release once a day. When one exists, a small dot appears on the menu-bar icon and Settings shows the version under Updates. Nothing pops up. Install it from the menu bar or from Settings when it suits you, or from Homebrew:
+
+```bash
+brew upgrade --cask thepearl/tap/notchboard
+```
+
+Either route keeps the Accessibility grant, because every release carries the same signing identity. A copy built from source never checks for updates, and loses the grant on each rebuild, so you grant it again.
 
 ## Uninstalling
 
@@ -56,7 +62,7 @@ Each call removes one matching item, so repeat each line until it reports nothin
 
 ## Building from source
 
-You need macOS 14 or later and Xcode 26 or later. An older Xcode fails loudly, on the first implicitly main-actor initialiser. The project has one Swift package dependency, [mqtt-nio](https://github.com/swift-server-community/mqtt-nio), fetched on the first build, so later builds work offline.
+You need macOS 14 or later and Xcode 26 or later. An older Xcode fails loudly, on the first implicitly main-actor initialiser. The project has two Swift package dependencies, [mqtt-nio](https://github.com/swift-server-community/mqtt-nio) and [Sparkle](https://github.com/sparkle-project/Sparkle), fetched on the first build, so later builds work offline.
 
 ```bash
 git clone https://github.com/thepearl/notchboard.git

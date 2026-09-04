@@ -69,6 +69,8 @@ final class MQTTSyncTransport: SyncTransport {
     private var wantsConnection = false
     private var reconnectDelay: TimeInterval = 1
     private var reconnectTask: Task<Void, Never>?
+    /// The goodbye in flight after a graceful `disconnect`, so a quit can wait for it.
+    private var disconnectTask: Task<Void, Never>?
     private var outbox: [SyncMessage] = []
     private var draining = false
     /// Publishes wait for in-flight SUBACKs. Without this, a publish can beat the
@@ -139,7 +141,7 @@ final class MQTTSyncTransport: SyncTransport {
         outbox = []
         guard let client else { return }
         self.client = nil
-        Task {
+        disconnectTask = Task {
             for message in remaining where client.isActive() {
                 var properties = MQTTProperties()
                 if let expiry = message.expirySeconds {
@@ -161,6 +163,11 @@ final class MQTTSyncTransport: SyncTransport {
     func publish(_ message: SyncMessage) {
         outbox.append(message)
         drainOutbox()
+    }
+
+    func awaitDisconnect(until deadline: ContinuousClock.Instant) async {
+        guard let disconnectTask else { return }
+        await awaitCompletion(of: disconnectTask, until: deadline)
     }
 
     func subscribe(to topicFilter: String) {
