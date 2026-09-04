@@ -49,5 +49,26 @@
 			</dict>
 		</dict>
 	</array>
+	<!--
+	  Sparkle (in-app updates, vision.md section 13.20). These are Sparkle's keys, not Apple's,
+	  so INFOPLIST_KEY_ build settings cannot carry them; they live here with the other keys
+	  the generated Info.plist cannot express.
+
+	  SUFeedURL is GitHub's "latest release" redirector, so the feed is always the appcast
+	  attached to the newest release and never a cached copy. SUPublicEDKey is the public half
+	  of the key that signs every update archive (the private half is in the maintainer's login
+	  keychain, and belongs in the SPARKLE_PRIVATE_KEY repository secret before the first tag). SUEnableAutomaticChecks is the
+	  default for the Settings toggle: Sparkle keeps the user's answer in its own defaults
+	  (flourix.notchboard.plist), and nothing in state.json mirrors it. SUAllowsAutomaticUpdates
+	  is off so Sparkle never offers to download and install on its own: the user chooses when.
+	-->
+	<key>SUFeedURL</key>
+	<string>https://github.com/thepearl/notchboard/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>b5CLyrYINTcYNacCKL3Pd6HqBOjsiq2iY8dMCRMAfTc=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
 </dict>
 </plist>

@@ -93,4 +93,4 @@ Knowing the edges beats finding them the hard way.
 * Not a password manager. This holds shared test credentials for a team. Your personal secrets belong somewhere with a different threat model.
 * Not a production secrets store. The app warns you when an element mixes production with another environment, and that warning is the whole mechanism.
 * Not a simulator automation tool. It fires one deeplink. Seeding fixtures and scripting flows are a different tool's job.
-* Not a service. The broker is the only server, it only relays ciphertext, and you choose it.
+* Not a service. Nothing of ours runs on a server. Rooms relay ciphertext through a broker you choose, and the app reads a small file on GitHub's releases page once a day to learn whether a newer version exists, downloading one only when you ask.

@@ -12,6 +12,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var viewModel: NotchboardViewModel
+    let updates: UpdateCenter
     let onReplayOnboarding: () -> Void
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -68,6 +69,8 @@ struct SettingsView: View {
                 }
             }
 
+            UpdatesSectionView(updates: updates)
+
             Section {
                 TextField("Debug URL scheme", text: $viewModel.deeplinkScheme, prompt: Text("e.g. notchdemo"))
                     .onSubmit { viewModel.setDeeplinkScheme(viewModel.deeplinkScheme) }
@@ -104,7 +107,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 430)
+        .frame(width: 420, height: 590)
     }
 
     private var roomStatusText: String {
@@ -129,5 +132,12 @@ private extension Binding where Value == Bool {
 }
 
 #Preview {
-    SettingsView(viewModel: NotchboardViewModel(), onReplayOnboarding: {})
+    SettingsView(
+        viewModel: NotchboardViewModel(),
+        updates: UpdateCenter(
+            provenance: BuildProvenance(installedVersion: "1.2", buildNumber: "1", teamIdentifier: nil),
+            driver: nil
+        ),
+        onReplayOnboarding: {}
+    )
 }

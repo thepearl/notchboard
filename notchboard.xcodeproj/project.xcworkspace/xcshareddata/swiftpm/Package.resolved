@@ -1,5 +1,5 @@
 {
-  "originHash" : "f4496f27dedf5447f89588eb3ffc19b72ee135d3b3e1d1d7148486cc0b6ef1ad",
+  "originHash" : "d529e54b3053bd6fb05784cd5ed181e317a3f70421f152e43f7f038d3ea1aa1e",
   "pins" : [
     {
       "identity" : "mqtt-nio",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "91d357875eabd63c55eee40fc6b85bc1f00839ed",
         "version" : "2.13.0"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "ac2def288cbff5cfc7df3ffef6abdf45b72bcb0a",
+        "version" : "2.9.6"
       }
     },
     {

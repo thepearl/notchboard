@@ -164,7 +164,49 @@ Check that the debug build registers the scheme in its `Info.plist` and that the
 
 </details>
 
+## Updating
+
+<details>
+
+<summary>An update was found but nothing popped up</summary>
+
+By design. A found update shows as a small dot on the menu-bar icon and as a `<version> available` row in Settings under Updates, and nothing else. Install it from either place: the menu-bar item reads **Update to \<version>**, and so does the button in Settings.
+
+</details>
+
+<details>
+
+<summary>Check for Updates says to move Notchboard to Applications</summary>
+
+The app is running from a download folder or from a disk image, where an update cannot be installed in place. Quit it, drag `notchboard.app` into Applications with the Finder, launch it from there and try again.
+
+</details>
+
+<details>
+
+<summary>The Updates section says built from source</summary>
+
+A copy you built yourself never checks for updates. Pull the latest source and rebuild, or install a release and let it update itself.
+
+</details>
+
+<details>
+
+<summary>Homebrew still lists the old version</summary>
+
+The app updated itself in place, and Homebrew's record of the cask did not move with it. A plain `brew upgrade` leaves a cask alone when its installed bundle is already current, so nothing is wrong. To refresh the record, run `brew upgrade --greedy-auto-updates`. A named `brew upgrade --cask thepearl/tap/notchboard` also gets there, and may quit and reinstall the same version on the way.
+
+</details>
+
 ## Homebrew
+
+<details>
+
+<summary>Homebrew refuses to load thepearl/tap</summary>
+
+Homebrew 6 loads nothing from a third-party tap you have not trusted. Run `brew trust thepearl/tap` once. The one-line `brew install --cask thepearl/tap/notchboard` trusts the cask on its own, so this only comes up on the two-step route, `brew tap` followed by a bare `brew install --cask notchboard`.
+
+</details>
 
 <details>
 

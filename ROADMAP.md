@@ -18,14 +18,15 @@ The room has passed a two-human test over a public broker on TLS. CI builds and 
 master and every pull request against it.
 
 Since 2026-08-28 the panel also docks to a standalone Android emulator window, and the same login
-button fires through `adb` when the emulator holds the dock. Implemented against researched
-emulator behaviour and covered by pure tests, but not yet exercised on a live AVD — vision.md
-§13.19 carries the flag and the list of what a first run must confirm.
+button fires through `adb` when the emulator holds the dock. Exercised on a live AVD on
+2026-08-30: docking works and the deeplink lands in the sample app, with the integration suite
+green — vision.md §13.19 carries the shorter list of what is still unconfirmed.
 
 Since 2026-08-20, v1.0 is a notarised download on the
 [releases page](https://github.com/thepearl/notchboard/releases) and installs with
 `brew install --cask thepearl/tap/notchboard`. The Developer ID signature also means the
-Accessibility grant survives updates, which self-built ad-hoc copies never managed.
+Accessibility grant survives updates, which self-built ad-hoc copies never managed. Since 1.2 the
+app updates itself from the releases page, quietly: a dot on the icon, nothing that interrupts.
 
 ## Next
 

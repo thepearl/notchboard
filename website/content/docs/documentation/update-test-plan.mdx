@@ -1,0 +1,181 @@
+---
+title: 'Notchboard updates — QA test plan'
+icon: ClipboardCheck
+description: The manual QA plan run against a rehearsal release before the first self-updating version ships.
+---
+
+First run of the in-app updater (vision.md §13.20). Everything below has passed automated
+tests against a fake update driver on one Mac. What only you can test: a real signed build, a
+real feed on GitHub, a real install over a running copy, and whether the quiet flow reads as
+quiet rather than broken.
+
+Time needed: about 40 minutes with one person and two Macs. The second Mac holds a room for
+T24 and needs nothing else.
+
+---
+
+## Ground rules
+
+- **A rehearsal feed, never the real one.** The scratch release lives on a throwaway public
+  repository, and the installed copy is pointed at it with `defaults write`. The real
+  `releases/latest` feed is not touched until the tag.
+- **Install with the Finder.** Drag the app into Applications. A Terminal move of a
+  quarantined download can leave it translocated, and T29 exists to see that on purpose,
+  not by accident.
+- Note the time whenever something feels slow. A check that takes ten seconds and one that
+  takes a minute are different findings.
+- Keep a friction log. Anything you had to ask about is a finding, even if it worked.
+
+## Prerequisites
+
+1. Two dry runs of the release workflow from the Actions tab: run A with the default build
+   number, run B with `build_number` set higher (10300, say) and `download_url_prefix`
+   pointing at a release on the throwaway repository. Create that release from run B's zip
+   and `appcast.xml`. The [releasing guide](./releasing.mdx) has the full procedure.
+2. Run A's app installed in `/Applications` by dragging with the Finder. Accessibility
+   granted, Launch at login switched on, a room joined from the second Mac.
+3. The installed copy pointed at the scratch feed, with the record of its last check
+   cleared, then relaunched. Sparkle checks at launch only when the last check is older
+   than a day, so without the delete the first launch after the switch does nothing:
+
+   ```bash
+   defaults write flourix.notchboard SUFeedURL "<scratch appcast url>"
+   defaults delete flourix.notchboard SULastCheckTime
+   ```
+
+4. Homebrew with the cask on record (`brew list --cask` names notchboard), for T26. On a Mac
+   that never installed it through brew, install it that way first and then replace the
+   bundle with run A's, again by dragging.
+5. A self-built copy (any Debug build from Xcode) for T27, and run A's zip downloaded with a
+   browser and left in `~/Downloads` for T29, so it carries the quarantine attribute.
+
+Both dry runs carry the marketing version the branch declares, so during the rehearsal the
+strings below read that version as the one "available". Only the build number differs.
+
+---
+
+## Test cases
+
+Record each as pass / fail / confused (confused counts — it means the UI didn't explain
+itself).
+
+### The quiet find
+
+**T20 — an update is found quietly**
+Relaunch the installed copy with the scratch feed set. Do nothing else for a minute.
+Expected: a small dot appears at the top right of the menu-bar icon, and Settings → Updates
+reads `<version> available`. No window opens, no notification arrives, nothing steals focus.
+The panel and its brand square are untouched.
+
+**T21 — the status row reads right**
+Run `defaults delete flourix.notchboard SULastCheckTime` again, relaunch, and open Settings
+straight away, before the check has run.
+Expected: `up to date · checked …` (or `not checked yet` on a copy that has never checked)
+first, then `checking…`, then `<version> available` once the feed has been read. Installed
+shows the version you are running. Nothing in the window animates.
+
+**T22 — the menu item is retitled**
+Open the menu-bar menu.
+Expected: the header reads `Notchboard <installed version>`, and the item directly above
+Settings reads `Update to <version>` rather than `Check for Updates`. It is greyed out only
+while a check is running.
+
+### Installing
+
+**T23 — install from Settings**
+Settings → Updates → click the button, which reads `Update to <version>`.
+Expected: Sparkle's standard dialog comes to the front with the release notes from the
+changelog section, and the panel does not cover it. Click Install Update. The app downloads
+the update, quits and relaunches on the new build. Settings → Updates then reads
+`up to date · checked …`, and the dot is gone.
+
+**T24 — the quit was a clean one**
+On the second Mac, watch the room header during T23. On the first Mac, note the modification
+time of `~/Library/Application Support/Notchboard/state.json` before and after.
+Expected: the peer's header drops by one when the app quits for the update and comes back
+after the relaunch. The modification time of `state.json` moved at quit.
+
+**T25 — nothing about the app's identity changed**
+After T23: System Settings → Privacy & Security → Accessibility, then Settings → Launch at
+login. Open an element with a secret field and reveal it.
+Expected: Accessibility is still granted, Launch at login is still on, and no Keychain prompt
+appears on the reveal.
+
+### Homebrew
+
+**T26 — Homebrew agrees**
+After T23, in a terminal: `brew upgrade`, then `brew list --versions notchboard`, then
+`brew upgrade --greedy-auto-updates`.
+Expected: the plain `brew upgrade` leaves the cask alone, because the installed bundle is
+already current, and `brew list --versions` names the same marketing version throughout. Both
+dry runs carry that one version, so the rehearsal can only show that nothing breaks. The lag
+this test is really about — brew still naming the old version after an in-app update, until
+`brew upgrade --greedy-auto-updates` — is only observable after the first real release, and
+belongs in the notes for that day.
+
+### Copies that must not update
+
+**T27 — a self-built copy stays out of it**
+Quit the installed copy. Note `defaults read flourix.notchboard SULastCheckTime`. Launch a
+Debug build from Xcode, open Settings → Updates, leave it running for a few minutes, then
+read the default again.
+Expected: the section reads `built from source · update by rebuilding`, with no toggle and no
+button. `SULastCheckTime` is unchanged, or absent on a Mac where no release copy has ever
+run. The self-built copy never checked.
+
+**T28 — the toggle sticks**
+Back on the installed copy: Settings → Updates → untick Check for updates automatically.
+Quit, relaunch, open Settings.
+Expected: the toggle is still off, and no check ran at launch, so the status row still shows
+the previous check's time. Then repeat the toggle while an update is actually pending (redo
+T20 first, with the delete of `SULastCheckTime`): switching it off is expected to leave the
+dot and the `Update to <version>` item alone until you install, skip or relaunch. That last
+part rests on Sparkle leaving a session in progress untouched, and is what this test is for.
+
+**T29 — a copy in Downloads says where to go**
+Quit the installed copy. Unzip run A's zip in `~/Downloads` with the Finder and launch the
+app from there. Menu bar → Check for Updates.
+Expected: Settings → Updates reads `move Notchboard to Applications to update`. Nothing fails
+silently. Quit it and delete it afterwards.
+
+**T30 — offline stays quiet**
+Back on the installed copy, with nothing pending after T23. Turn wi-fi off, run
+`defaults delete flourix.notchboard SULastCheckTime` so the launch check runs again, and
+relaunch. Do not click Check for Updates yet.
+Expected: no alert, no dot, no notification. The row reads `not checked yet`, because the
+delete above removed the only record of when the last check ran; the pass criterion is the
+silence, not the text. Then click Check for Updates while still offline: the status
+row reads `couldn't reach GitHub · try again later`, and Sparkle may show its own error alert
+as well, because a check you asked for is allowed to answer out loud. Turn wi-fi back on.
+
+---
+
+## Results
+
+| # | Result (pass / fail / confused) | Timing felt | Notes |
+|---|---|---|---|
+| T20 | | | |
+| T21 | | | |
+| T22 | | | |
+| T23 | | | |
+| T24 | | | |
+| T25 | | | |
+| T26 | | | |
+| T27 | | | |
+| T28 | | | |
+| T29 | | | |
+| T30 | | | |
+
+## Known and accepted for this round — don't file these
+
+- While a quiet reminder is pending, no further scheduled check runs until the app is
+  relaunched, so the version on offer can go stale. The status row shows when it was found.
+- Homebrew's record lags behind after an in-app update, until
+  `brew upgrade --greedy-auto-updates`.
+- A manual Check for Updates with nothing new shows Sparkle's own "You're up to date" alert.
+  A check you asked for always answers out loud. Only the scheduled ones are quiet.
+
+## What to send back
+
+The results table, the friction log, and the answer to one question: did the dot read as
+"an update is waiting" without anyone telling you what it meant?

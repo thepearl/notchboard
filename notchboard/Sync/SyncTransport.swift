@@ -62,4 +62,48 @@ protocol SyncTransport: AnyObject {
     func disconnect(publishingLastWill: Bool)
     func publish(_ message: SyncMessage)
     func subscribe(to topicFilter: String)
+    /// Waits for a graceful `disconnect` to finish flushing (the goodbye is published from a
+    /// task the transport spawns), or for the deadline, whichever comes first. Only the quit
+    /// path cares (AppDelegate.applicationShouldTerminate); the loopback fake has nothing to
+    /// wait for, hence the default.
+    func awaitDisconnect(until deadline: ContinuousClock.Instant) async
+}
+
+extension SyncTransport {
+    func awaitDisconnect(until deadline: ContinuousClock.Instant) async {}
+}
+
+/// Waits for `task`, or until `deadline`, whichever lands first — and really returns at the
+/// deadline. A task group cannot do this: it awaits every child before returning, and
+/// `Task<Void, Never>.value` has no way to answer the cancellation the group sends, so a
+/// racing group returns when the *task* finishes however long that takes (measured: a
+/// one-second cap over a five-second task returned after five seconds). The quit path is the
+/// caller, so an unbounded wait here is a Mac that will not shut down behind a dead broker.
+func awaitCompletion(of task: Task<Void, Never>, until deadline: ContinuousClock.Instant) async {
+    let gate = FirstWinsGate()
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        gate.arm(continuation)
+        Task {
+            await task.value
+            gate.resume()
+        }
+        Task {
+            try? await Task.sleep(until: deadline, clock: .continuous)
+            gate.resume()
+        }
+    }
+}
+
+/// Resumes its continuation exactly once, for whichever waiter arrives first.
+private final class FirstWinsGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func arm(_ continuation: CheckedContinuation<Void, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
 }

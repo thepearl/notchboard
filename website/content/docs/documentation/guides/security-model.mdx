@@ -77,6 +77,10 @@ Android adds one exposure of its own: emulators on API 32 and older log the inte
 
 These are shared test credentials on a local developer tool, so the exposures are documented rather than hidden, and everything under the app's own control is redacted.
 
+The update check is the one network request that is not a room. Once a day, starting at first launch, and whenever you ask, Notchboard fetches a small file from GitHub's releases page. GitHub sees your IP address, a user agent naming the app and its version (`notchboard/1.2 Sparkle/2.9.6`) and the time, and nothing else.
+
+An update installs only if its signature checks out against the release key shipped inside the app and its Apple signature is valid. Both keys live as secrets in the release repository, so anyone who can push a tag there can sign a release with both. The two signatures protect the download in transit and on the CDN, not against a compromised maintainer account. A Homebrew install additionally trusts the tap repository, whose cask names the URL and checksum brew fetches. Settings turns the automatic check off.
+
 ## What Notchboard is not
 
 * Not a password manager. Your personal secrets belong somewhere with a different threat model.

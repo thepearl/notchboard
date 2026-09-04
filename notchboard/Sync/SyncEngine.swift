@@ -119,6 +119,11 @@ final class RoomSession {
         connect()
     }
 
+    /// After `suspend()`: waits for the goodbye to leave the socket, or for the deadline.
+    func awaitGoodbye(until deadline: ContinuousClock.Instant) async {
+        await transport.awaitDisconnect(until: deadline)
+    }
+
     /// The display name changed. This copy is what every later claim and presence publish
     /// carries, so it has to move while the session is alive — it used to be fixed at
     /// construction, which left teammates reading the name this Mac launched with until
@@ -777,6 +782,20 @@ final class SyncEngine {
     func sleepAll() {
         for session in sessions.values {
             session.suspend()
+        }
+    }
+
+    /// True while any room is live, so a quit knows whether a goodbye is owed at all.
+    var hasConnectedSessions: Bool {
+        sessions.values.contains { $0.state == .connected }
+    }
+
+    /// After `sleepAll()`: waits for every goodbye to leave its socket, capped so a dead
+    /// broker cannot hold the process. The quit path's only reason to wait.
+    func drainAll(cap: Duration) async {
+        let deadline = ContinuousClock.now + cap
+        for session in sessions.values {
+            await session.awaitGoodbye(until: deadline)
         }
     }
 

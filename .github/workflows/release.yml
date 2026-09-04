@@ -6,6 +6,11 @@ name: Release
 # published, so the "Cask checksum" workflow that fires on publication finds a matching
 # pin instead of a race.
 #
+# The release is also what every installed copy updates from: the job generates the
+# Sparkle appcast and attaches it to the same release as the zip, in one publish call,
+# so the feed at releases/latest/download/appcast.xml never describes a zip that is not
+# there yet (vision.md §13.20).
+#
 # Secrets this needs, all set with `gh secret set`:
 #   MACOS_CERTIFICATE           base64 of the Developer ID Application .p12
 #   MACOS_CERTIFICATE_PASSWORD  the .p12's password
@@ -13,22 +18,30 @@ name: Release
 #   ASC_ISSUER_ID               App Store Connect issuer id
 #   ASC_KEY_P8                  contents of the AuthKey_*.p8
 #   TAP_GITHUB_TOKEN            fine-grained PAT, contents read/write on thepearl/homebrew-tap
+#   SPARKLE_PRIVATE_KEY         the EdDSA private key exported with generate_keys -x (one base64 line)
 #
 # Fork pull requests never see these secrets (GitHub withholds them by design), and the
 # workflow only runs on tags, which only maintainers can push.
 #
 # Running it from the Actions tab (workflow_dispatch) is a DRY RUN: it builds, signs,
-# notarises and staples for real, verifies write access to the tap without pushing, and
-# uploads the finished zip as a workflow artifact instead of publishing anything.
+# notarises and staples for real, generates and signs the appcast, verifies write access
+# to the tap without pushing, and uploads the zip, the appcast and the release notes as a
+# workflow artifact instead of publishing anything. The two inputs exist for rehearsing an
+# update end to end: a higher build number and a prefix pointing at a scratch release make
+# an installed copy of the previous dry run offer this one as an update.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      version:
-        description: Version label for the dry-run artefact name
-        default: 0.0.0-dryrun
-        required: true
+      build_number:
+        description: CFBundleVersion override for a rehearsal build (default derived from MARKETING_VERSION)
+        required: false
+        type: string
+      download_url_prefix:
+        description: Where the rehearsal zip will be hosted, with a trailing slash (default the real GitHub release URL)
+        required: false
+        type: string
 
 jobs:
   release:
@@ -40,6 +53,79 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # The project is the single source of the version: the tag has to agree with it, and
+      # so do the zip name, the cask pin and what the app reports about itself. Two numeric
+      # components is load-bearing twice over: Homebrew's version comparison bails when the
+      # dot-component counts differ, and the build number formula only has room for MAJOR
+      # and MINOR. A hotfix bumps MINOR (vision.md §13.20).
+      - name: Read the version and build number
+        env:
+          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
+          INPUT_DOWNLOAD_URL_PREFIX: ${{ inputs.download_url_prefix }}
+        run: |
+          set -euo pipefail
+          version="$(xcodebuild -project notchboard.xcodeproj -scheme notchboard -configuration Release -showBuildSettings 2>/dev/null \
+            | sed -n 's/^[[:space:]]*MARKETING_VERSION = //p' | head -n1)"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error::MARKETING_VERSION is '${version}'. It must be two numeric components (MAJOR.MINOR)."
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "push" ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match MARKETING_VERSION ${version}. Bump the project and the changelog in one commit, then tag that commit."
+            exit 1
+          fi
+          # Sparkle compares CFBundleVersion, so it has to grow with every release:
+          # MAJOR*10000 + MINOR*100 (1.2 becomes 10200). The override is for rehearsals.
+          build_number="$INPUT_BUILD_NUMBER"
+          if [ -z "$build_number" ]; then
+            major="${version%%.*}"
+            minor="${version#*.}"
+            build_number=$(( 10#$major * 10000 + 10#$minor * 100 ))
+          elif ! printf '%s' "$build_number" | grep -Eq '^[0-9]+$'; then
+            echo "::error::build_number must be digits only, got '${build_number}'."
+            exit 1
+          fi
+          prefix="$INPUT_DOWNLOAD_URL_PREFIX"
+          [ -n "$prefix" ] || prefix="https://github.com/thepearl/notchboard/releases/download/v${version}/"
+          case "$prefix" in
+            */) ;;
+            *)
+              echo "::error::download_url_prefix must end with a slash, got '${prefix}'. generate_appcast appends the zip name to it."
+              exit 1
+              ;;
+          esac
+          {
+            echo "VERSION=$version"
+            echo "BUILD_NUMBER=$build_number"
+            echo "DOWNLOAD_URL_PREFIX=$prefix"
+          } >> "$GITHUB_ENV"
+          echo "Version ${version}, build ${build_number}, downloads from ${prefix}" >> "$GITHUB_STEP_SUMMARY"
+
+      # The changelog page is the single source of release notes: its `## <version> (date)`
+      # section becomes the GitHub release body and, embedded in the appcast, the notes
+      # Sparkle shows before installing. The closing "Full details" line points back at the
+      # release the reader is already looking at, so it is dropped. A missing section fails
+      # the release here rather than shipping an update with an empty description.
+      - name: Extract the release notes
+        run: |
+          set -euo pipefail
+          changelog="website/content/docs/changelog/index.mdx"
+          mkdir -p build/appcast
+          notes="build/appcast/notchboard-${VERSION}.md"
+          awk -v v="$VERSION" '
+            index($0, "## " v " (") == 1 { found = 1; next }
+            found && index($0, "## ") == 1 { exit }
+            found && index($0, "Full details on the [GitHub release]") != 1 { print }
+          ' "$changelog" > "$notes"
+          if ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error::${changelog} has no \"## ${VERSION} (\" section. Add the changelog entry before tagging."
+            exit 1
+          fi
+          # The publish step reads its own copy, so the release body never depends on what
+          # generate_appcast leaves in its directory.
+          cp "$notes" build/release-notes.md
+          echo "NOTES_FILE=build/release-notes.md" >> "$GITHUB_ENV"
 
       # A throwaway keychain, unlocked for this job only. The identity name is read from
       # the certificate rather than hardcoded, so a renewed certificate needs no edit here.
@@ -72,27 +158,130 @@ jobs:
       - name: Build and stage
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            version="${{ inputs.version }}"
-          else
-            version="${GITHUB_REF_NAME#v}"
-          fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          scripts/release.sh --version "$version" --clean
+          scripts/release.sh --version "$VERSION" --build-number "$BUILD_NUMBER" --clean
 
-      # Inside-out: the Swift compatibility dylibs first, the bundle last. Signing only
-      # the bundle leaves them ad-hoc signed and the notary service rejects the archive
-      # over them. (--deep also covers them but Apple has deprecated it.)
+      # The command-line tools must match the framework the app embeds, so this version
+      # moves together with the SPM pin in project.pbxproj (exactVersion) and nowhere
+      # else. The checksum is GitHub's digest for the release asset: a replaced tarball
+      # fails here rather than signing the feed with an unknown binary.
+      - name: Fetch the Sparkle command-line tools
+        run: |
+          set -euo pipefail
+          sparkle_version="2.9.6"
+          sparkle_sha256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+          tarball="$RUNNER_TEMP/Sparkle-${sparkle_version}.tar.xz"
+          curl -fsSL -o "$tarball" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${sparkle_version}/Sparkle-${sparkle_version}.tar.xz"
+          echo "${sparkle_sha256}  ${tarball}" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$tarball" -C "$RUNNER_TEMP/sparkle"
+          echo "SPARKLE_BIN=$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_ENV"
+
+      # The private key in the secret and the public key in Info.plist were generated
+      # together, once. If they ever diverge (a rotated secret, a key pasted from another
+      # project), every installed copy would reject the update as unsigned, so the pair is
+      # proven here before anything is signed or published. The public half is derived
+      # from the exported seed with CryptoKit rather than with Sparkle's tools, which only
+      # read keys out of a keychain. If CryptoKit's raw representation ever disagrees with
+      # what generate_keys prints, the fallback is `generate_keys -f <file>` to import the
+      # seed into the runner's keychain and then `generate_keys -p` to print the public key.
+      - name: Assert the signing key matches SUPublicEDKey
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::The SPARKLE_PRIVATE_KEY secret is empty. Export it with generate_keys -x and set it with gh secret set."
+            exit 1
+          fi
+          expected="$(plutil -extract SUPublicEDKey raw -o - build/release/notchboard.app/Contents/Info.plist)"
+          derived="$(xcrun swift - <<'EOS'
+          import CryptoKit
+          import Foundation
+
+          // generate_keys -x writes the base64 of the 32-byte seed. Its older layout is
+          // 96 bytes: the 64-byte expanded private key followed by the public key.
+          let encoded = (ProcessInfo.processInfo.environment["SPARKLE_PRIVATE_KEY"] ?? "")
+              .trimmingCharacters(in: .whitespacesAndNewlines)
+          guard let secret = Data(base64Encoded: encoded) else {
+              FileHandle.standardError.write(Data("SPARKLE_PRIVATE_KEY is not valid base64\n".utf8))
+              exit(1)
+          }
+          let publicKey: Data
+          switch secret.count {
+          case 32:
+              do {
+                  publicKey = try Curve25519.Signing.PrivateKey(rawRepresentation: secret).publicKey.rawRepresentation
+              } catch {
+                  FileHandle.standardError.write(Data("CryptoKit rejected the seed: \(error)\n".utf8))
+                  exit(1)
+              }
+          case 96:
+              publicKey = secret.suffix(32)
+          default:
+              FileHandle.standardError.write(Data("SPARKLE_PRIVATE_KEY decodes to \(secret.count) bytes, expected 32 (or 96 for the older layout)\n".utf8))
+              exit(1)
+          }
+          print(publicKey.base64EncodedString())
+          EOS
+          )"
+          if [ "$derived" != "$expected" ]; then
+            echo "::error::SPARKLE_PRIVATE_KEY does not match SUPublicEDKey in Info.plist (derived ${derived}, plist ${expected}). Every installed copy would reject the update."
+            exit 1
+          fi
+          echo "The Sparkle signing key matches SUPublicEDKey."
+
+      # Inside-out: Sparkle's nested code first, then the Swift compatibility dylibs, the
+      # bundle last. Signing only the bundle leaves everything nested with the signature it
+      # shipped with (Sparkle's own, ad-hoc for the dylibs) and the notary service rejects
+      # the archive over it. (--deep also covers them but Apple has deprecated it, and it
+      # cannot apply the per-item flag Downloader.xpc gets below.) The framework has to be there:
+      # without it the app can never update itself, and that failure would show only as a
+      # release nobody receives (vision.md §13.20).
       - name: Sign
         run: |
           set -euo pipefail
           app="build/release/notchboard.app"
+          sparkle="$app/Contents/Frameworks/Sparkle.framework"
+          if [ ! -d "$sparkle" ]; then
+            echo "::error::${sparkle} is missing. The build did not embed the Sparkle package."
+            exit 1
+          fi
+          sign() { codesign --force --options runtime --timestamp --sign "$IDENTITY" "$@"; }
+          sign "$sparkle/Versions/B/XPCServices/Installer.xpc"
+          # Sparkle's signing recipe passes --preserve-metadata=entitlements here so that any
+          # entitlements a future Sparkle ships on Downloader.xpc survive the re-sign. The 2.9.6
+          # binary carries none (the service has been unsandboxed since Sparkle 2.6), so today
+          # the flag preserves nothing and is kept for parity with the recipe.
+          sign --preserve-metadata=entitlements "$sparkle/Versions/B/XPCServices/Downloader.xpc"
+          sign "$sparkle/Versions/B/Autoupdate"
+          sign "$sparkle/Versions/B/Updater.app"
+          sign "$sparkle"
           for dylib in "$app"/Contents/Frameworks/*.dylib; do
             [ -e "$dylib" ] || continue
-            codesign --force --options runtime --timestamp --sign "$IDENTITY" "$dylib"
+            sign "$dylib"
           done
-          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$app"
+          sign "$app"
           codesign --verify --deep --strict "$app"
+          # The hardened runtime only loads code that shares the main executable's team, so
+          # one binary left with another signature means an updater that never starts.
+          # `|| true` because codesign exits 1 on an unsigned Mach-O, and under pipefail that
+          # would kill the loop below before it could name the file.
+          team_of() { codesign -dvv "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p' || true; }
+          app_team="$(team_of "$app")"
+          if [ -z "$app_team" ] || [ "$app_team" = "not set" ]; then
+            echo "::error::${app} has no TeamIdentifier after signing. The identity is not a Developer ID certificate."
+            exit 1
+          fi
+          find "$app" -type f -print0 | while IFS= read -r -d '' binary; do
+            file -b "$binary" | grep -q 'Mach-O' || continue
+            team="$(team_of "$binary")"
+            if [ "$team" != "$app_team" ]; then
+              echo "::error::${binary} reports TeamIdentifier '${team:-<unsigned>}' but the app reports '${app_team}'. Every nested binary must be re-signed with the same identity."
+              exit 1
+            fi
+          done
+          echo "Every Mach-O under ${app} carries TeamIdentifier ${app_team}."
 
       # Each re-zip is deliberate: the signature must be inside the archive that gets
       # notarised, and the staple ticket must be inside the archive that gets shipped.
@@ -118,12 +307,103 @@ jobs:
           spctl --assess --type execute --verbose "$app"
           sha="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
           echo "SHA256=$sha" >> "$GITHUB_ENV"
+          echo "ZIP_LENGTH=$(stat -f%z "$zip")" >> "$GITHUB_ENV"
           echo "notchboard-${VERSION}.zip sha256: $sha" >> "$GITHUB_STEP_SUMMARY"
 
+      # generate_appcast describes every archive in the directory it is given and pairs
+      # each with the release notes of the same name, so the directory holds exactly the
+      # final zip (the one the sha256 above describes, after the last re-zip) and the
+      # notes, nothing else. The private key arrives on stdin and never touches the disk.
+      # The assertions pin what an installed copy will act on: the build number Sparkle
+      # compares, the version it shows, the signature it verifies, the byte length it
+      # checks the download against, the URL it downloads, and notes embedded as markdown
+      # rather than a link Sparkle would have to fetch. On a real release the new build
+      # number must also beat every entry in the published feed, or every installed copy
+      # would consider itself up to date for good (vision.md §13.20).
+      - name: Generate the appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          zip="build/release/notchboard-${VERSION}.zip"
+          appcast_dir="build/appcast"
+          appcast="$appcast_dir/appcast.xml"
+          cp "$zip" "$appcast_dir/"
+          contents="$(ls -A "$appcast_dir" | sort | tr '\n' ' ')"
+          if [ "$contents" != "notchboard-${VERSION}.md notchboard-${VERSION}.zip " ]; then
+            echo "::error::${appcast_dir} must hold only the zip and its notes, found: ${contents}"
+            exit 1
+          fi
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_BIN/generate_appcast" --ed-key-file - \
+            --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
+            --embed-release-notes \
+            --link "https://github.com/thepearl/notchboard" \
+            --full-release-notes-url "https://thepearl.github.io/notchboard/changelog/" \
+            -o "$appcast" "$appcast_dir"
+          assert_contains() {
+            if ! grep -qF -- "$1" "$appcast"; then
+              echo "::error::appcast.xml lacks $1 ($2)."
+              exit 1
+            fi
+          }
+          # generate_appcast writes the version pair as child elements of the item, and
+          # Sparkle also reads them as enclosure attributes, so both spellings pass.
+          assert_matches() {
+            if ! grep -qE -- "$1" "$appcast"; then
+              echo "::error::appcast.xml lacks $2 ($3)."
+              exit 1
+            fi
+          }
+          assert_matches "sparkle:version(=\"|>)${BUILD_NUMBER}(\"|<)" "sparkle:version ${BUILD_NUMBER}" "the build number Sparkle compares"
+          assert_matches "sparkle:shortVersionString(=\"|>)${VERSION}(\"|<)" "sparkle:shortVersionString ${VERSION}" "the version Sparkle shows"
+          assert_contains 'sparkle:edSignature="' "the EdDSA signature over the zip"
+          assert_contains "length=\"${ZIP_LENGTH}\"" "the byte length of the final zip"
+          assert_contains "url=\"${DOWNLOAD_URL_PREFIX}notchboard-${VERSION}.zip\"" "the enclosure URL"
+          assert_contains 'sparkle:format="markdown"' "release notes embedded as markdown"
+          if grep -q 'sparkle:releaseNotesLink' "$appcast"; then
+            echo "::error::appcast.xml links to external release notes instead of embedding them."
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            published="$RUNNER_TEMP/published-appcast.xml"
+            status="$(curl -sSL -o "$published" -w '%{http_code}' \
+              https://github.com/thepearl/notchboard/releases/latest/download/appcast.xml)"
+            case "$status" in
+              200)
+                # `|| true` because grep exits 1 when it matches nothing, and under pipefail
+                # that would end the step with no explanation at all.
+                highest="$(grep -oE 'sparkle:version(="|>)[0-9]+' "$published" | tr -dc '0-9\n' | sort -n | tail -n 1 || true)"
+                if [ -z "$highest" ]; then
+                  echo "::error::The published appcast answered 200 but carries no sparkle:version, so the build number cannot be compared. Inspect the appcast.xml asset on the latest release."
+                  exit 1
+                fi
+                if [ "$BUILD_NUMBER" -le "$highest" ]; then
+                  echo "::error::Build number ${BUILD_NUMBER} is not above ${highest}, the highest in the published appcast. No installed copy would see this release as an update."
+                  exit 1
+                fi
+                echo "Build ${BUILD_NUMBER} is above the published feed's highest, ${highest}."
+                ;;
+              404)
+                echo "No published appcast yet (the feed starts with the first Sparkle release), skipping the build number comparison."
+                ;;
+              *)
+                echo "::error::Fetching the published appcast returned HTTP ${status}."
+                exit 1
+                ;;
+            esac
+          fi
+          {
+            echo '```xml'
+            cat "$appcast"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Bumped before the release exists so the pin never lags the download it describes.
-      # The in-repo Casks/notchboard.rb copy is documentation and is not touched here.
-      # On a dry run this only proves the token can push (git push --dry-run authenticates
-      # and checks permissions without moving any ref).
+      # The in-repo Casks/notchboard.rb is the source: it is copied over the tap's copy
+      # whole and only the version and sha256 lines are stamped on the copy, so a stanza
+      # edited here (auto_updates, zap paths, caveats) reaches the tap with the next
+      # release instead of drifting. On a dry run this only proves the token can push
+      # (git push --dry-run authenticates and checks permissions without moving any ref).
       - name: Bump the tap
         env:
           GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
@@ -139,26 +419,43 @@ jobs:
             echo "Tap write access verified, nothing pushed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          cp "$GITHUB_WORKSPACE/Casks/notchboard.rb" Casks/notchboard.rb
           sed -i '' -e "s/^  version \".*\"/  version \"${VERSION}\"/" \
                     -e "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/notchboard.rb
+          if ! grep -q "^  version \"${VERSION}\"$" Casks/notchboard.rb \
+            || ! grep -q "^  sha256 \"${SHA256}\"$" Casks/notchboard.rb; then
+            echo "::error::Stamping version and sha256 into Casks/notchboard.rb failed. The two lines must keep their two-space indent for the sed patterns to match."
+            exit 1
+          fi
           git diff --quiet && { echo "Tap already pins ${VERSION}."; exit 0; }
           git commit -am "notchboard ${VERSION}"
           git push origin HEAD:master
 
+      # One call attaches the zip, the appcast and the notices and marks the release
+      # latest, so releases/latest/download/appcast.xml resolves to this feed the moment
+      # the zip it points at exists. --verify-tag refuses to create the tag itself: the
+      # pushed tag is the trigger and must already be there.
       - name: Publish the release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "v${VERSION}" "build/release/notchboard-${VERSION}.zip" \
-            --title "v${VERSION}" --generate-notes
+          gh release create "v${VERSION}" \
+            "build/release/notchboard-${VERSION}.zip" \
+            build/appcast/appcast.xml \
+            THIRD-PARTY-NOTICES.md \
+            --title "v${VERSION}" --notes-file "$NOTES_FILE" --latest --verify-tag
 
       # The dry run's product, downloadable from the run page to check the app launches
-      # cleanly on another Mac (no Gatekeeper complaint means signing and stapling worked).
+      # cleanly on another Mac (no Gatekeeper complaint means signing and stapling worked)
+      # and, with the appcast and the notes, to rehearse an update against a scratch release.
       - name: Upload the dry-run artefact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: notchboard-${{ env.VERSION }}
-          path: build/release/notchboard-${{ env.VERSION }}.zip
+          name: notchboard-${{ env.VERSION }}-build${{ env.BUILD_NUMBER }}-dryrun
+          path: |
+            build/release/notchboard-${{ env.VERSION }}.zip
+            build/appcast/appcast.xml
+            build/appcast/notchboard-${{ env.VERSION }}.md

@@ -753,7 +753,7 @@ the escalation path.
 
 ### 13.11 The first two-human test (2026-08-08)
 
-Ghazi and a colleague ran the QA plan (docs/room-test-plan.md) against the public EMQX
+Ghazi and a colleague ran the QA plan (website/content/docs/documentation/room-test-plan.mdx) against the public EMQX
 broker — the first time two people, two Macs and a real TLS handshake met the room. T1–T10
 all passed: setup, export-as-invitation, import + join prompt, adopt, presence, live edits
 both ways, schema propagation, attributed in-use marks, notify-when-free, login-on-sim.
@@ -1213,6 +1213,121 @@ CollectionDialogs, MockData's coach-mark line, bug_report.yml's environment drop
 description, the USAGE/docs sweep beyond the prerequisite blocks), and NotchDemoAndroid ships
 without a Gradle wrapper (nothing on this machine can generate the jar; its README says so).
 
+### 13.20 In-app updates via Sparkle (2026-09-04)
+
+Notchboard now tells you when a newer release exists and installs it on request. Until now the
+only signal was a stale `brew list`, and Ghazi's own Mac was the reproduction: a 1.0 cask
+install sitting under a 1.1 release with nothing in the app to say so. The mechanism is Sparkle
+2.9.6, the second SPM dependency; the policy is quiet. A scheduled check that finds something
+lights a static dot on the menu-bar icon, retitles the menu item to "Update to x" and fills an
+Updates row in Settings. Nothing pops up, nothing steals focus. Install is one click from either
+place, and Sparkle's own dialog takes over from there.
+
+- **Sparkle, standard dialog, gentle reminders.** `SPUStandardUpdaterController` plus the
+  gentle-reminders half of `SPUStandardUserDriverDelegate`:
+  `standardUserDriverShouldHandleShowingScheduledUpdate` returns false, so a scheduled find never
+  shows a window, and `standardUserDriverWillHandleShowingUpdate(false, …)` is the one event that
+  lights the dot. A user-initiated check (menu or Settings) calls `checkForUpdates()`, which
+  re-presents the deferred update in focus without a new fetch. No custom user driver (sixteen
+  methods that must present UI anyway), no activation-policy flip (an accessory app can show
+  windows, Sparkle activates it), no notifications, no automatic download.
+- **The state lives in `UpdateCenter`**, an `@Observable` fourth state holder, behind an
+  `UpdateDriver` protocol with a fake in tests (the `SyncTransport` precedent). The rules that
+  needed tests: only a handed-over reminder lights the dot; "Remind Me Later" keeps "Update to x"
+  with the dot off and "Skip This Version" returns to idle (Sparkle's `userDidMake:` choice
+  callback); a scheduled failure leaves the row alone, because Sparkle is silent about those too
+  and an offline daily check must not pin an error until tomorrow, while user-initiated failures
+  and the persistent translocation and disk-image codes (1005, 1003) do show; a quiet re-check
+  never enters "checking…" over an update already on offer, or an offline day would erase the
+  reminder the user asked for (an adversarial review caught this before release); a find dates
+  the row the way "no update" does, so skipping a version cannot leave it saying no check has
+  ever run; the driver marks a re-focused reminder user-initiated, because re-presenting a
+  pending update runs no check and Sparkle's `mayPerform` hook never fires, which would
+  otherwise classify a failed install the user started as a scheduled one and swallow it; and
+  the toggle is
+  a read mirror of Sparkle's own UserDefaults value, written from KVO only, so it never becomes a
+  second source of truth (state.json holds nothing about updates, by Sparkle's own guidance).
+  Status copy is lowercase with a middle dot, like the room status beside it.
+- **Self-built copies never start the updater.** An ad-hoc build has no team identifier, and
+  Sparkle accepts an EdDSA-valid update over a differently signed host: it would replace a
+  DerivedData build with the Developer ID release and silently swap the identity the
+  Accessibility grant and every Keychain ACL are bound to. `BuildProvenance` gates on the exact
+  release team (a provenance constant, not a signing setting), which also means a fork's own
+  Developer ID build is not replaced by our release. Settings shows "built from source · update
+  by rebuilding" and nothing else.
+- **Debug builds needed an entitlement.** Library validation (part of the hardened runtime)
+  admits only Apple's code or code sharing the main executable's Team ID; an ad-hoc binary has
+  none, so an ad-hoc `Sparkle.framework` cannot load into an ad-hoc app. The one dylib the app
+  loaded before was weak-linked, which is why this never showed. `Debug.entitlements` (repo
+  root, beside `Info.plist` and for the same synchronized-folder reason) carries
+  `com.apple.security.cs.disable-library-validation` for the app target's Debug configuration
+  only. Release keeps full library validation, and release.yml's Developer ID re-sign carries no
+  entitlements at all.
+- **CFBundleVersion had to start moving.** Sparkle compares it, and `CURRENT_PROJECT_VERSION`
+  was 1 in every shipped build. `release.sh` now stamps `MAJOR*10000 + MINOR*100` derived from
+  `MARKETING_VERSION` (1.2 is 10200) on the xcodebuild line: deterministic, reproducible by hand,
+  and monotonic as long as versions stay two-component. A hotfix bumps MINOR, because Homebrew's
+  bundle comparison bails when dot-component counts differ. The tag must equal
+  `MARKETING_VERSION` and the changelog must carry a `## <version> (<date>)` section, or the
+  release job fails before building.
+- **The feed rides GitHub Releases.** `generate_appcast` runs in the release job with the EdDSA
+  key piped from the `SPARKLE_PRIVATE_KEY` secret, embeds the changelog section as Markdown
+  release notes (`--embed-release-notes`, without which a `.md` beside the archive is linked to a
+  URL that would 404), and `appcast.xml` is attached to the same release as the zip in one
+  `gh release create … --latest`. `SUFeedURL` is the `releases/latest/download` redirector: two
+  redirects, `cache-control: no-cache`, never stale, and `--latest` pins it explicitly. GitHub
+  Pages was rejected, because the docs deploy runs from master and a tag build cannot feed it.
+  Sparkle's nested code (Installer.xpc, Downloader.xpc with `--preserve-metadata=entitlements`,
+  Autoupdate, Updater.app, then the framework) is signed inside-out before the dylibs and the
+  app: the §13.18 lesson applied to a framework. `SUAllowsAutomaticUpdates` is off so Sparkle
+  never offers to install on its own. The public key sits in `Info.plist`; the private key was
+  generated into Ghazi's login keychain on 2026-09-04 and must be exported into the repository
+  secret before the first tag.
+- **Homebrew coexists.** The cask gains `auto_updates true`. On Homebrew 6 that does not make
+  `brew upgrade` skip it: brew reads the installed bundle's `Info.plist` and upgrades when it is
+  older than the tap's, so a Sparkle self-update is invisible to brew and a brew-only user still
+  gets every release. Homebrew 6's tap trust had broken the documented two-step install; every
+  command is now the fully qualified `thepearl/tap/notchboard` form. The release job copies the
+  in-repo cask into the tap (the two copies had already drifted) and stamps version and sha on
+  the copy.
+- **The quit path was leaking the goodbye.** Sparkle installs by sending a quit event and
+  waiting, which made a pre-existing hole routine: `MQTTSyncTransport.disconnect` publishes the
+  offline presence from a task nothing awaited, so the process could exit with the goodbye still
+  in flight. `applicationShouldTerminate` now returns `.terminateLater` while a room is connected
+  and waits for the flush, capped at one second so a dead broker cannot wedge a quit. The same
+  fix covers ⌘Q and the cask's `uninstall quit:`. The cap needed a first-one-wins continuation
+  (`awaitCompletion`, in SyncTransport.swift): the obvious racing task group has no cap at all,
+  because a group awaits every child before returning and `Task<Void, Never>.value` cannot
+  answer the cancellation the group sends — measured at five seconds against a one-second cap,
+  which is a Mac that will not shut down behind a dead broker.
+- **What is disclosed.** The update check is the one network request that is not a room: a GET
+  to GitHub once a day (the first one seconds after first launch) and on demand, with User-Agent
+  `notchboard/1.2 Sparkle/2.9.6` (Sparkle names the host from `CFBundleName`, and the
+project sets no display name) and no system profile. GitHub sees the IP, the version and the
+  time. Recorded as an accepted exposure in the security model, with the Settings toggle as the
+  off switch, and as §14.5 decision 7: a read of a public file is not the backend §14.1.3
+  forbids.
+
+**Verification.** 364 tests in 71 suites (329 → 364) with no broker, no simulator and no
+emulator; Debug build with zero warnings in app sources; the hosted test process loads
+`Sparkle.framework` under the Debug entitlement; the documentation site builds and its 1,299
+internal links check. Sparkle's headers were read for the Swift names the driver relies on.
+
+**Not yet exercised:** the whole runtime flow. No Sparkle-enabled build has been run yet: the
+menu-bar dot, the Settings section height (590pt, a fit rather than a measurement), the panel
+yielding while Sparkle's dialog is up, the install-and-relaunch cycle, the goodbye reaching a
+peer, and the release job's new steps (key match, appcast assertions, inside-out signing under
+notarisation). That is what the rehearsal in releasing.mdx and QA plan T20–T30 exist for, and
+it must run before `v1.2` is tagged. Users on 1.1 have no Sparkle; the 1.2 release notes carry
+`brew upgrade --cask thepearl/tap/notchboard`.
+
+**Accepted rough edges:** while a quiet reminder is pending Sparkle keeps the session open and
+runs no further scheduled check, so the offered version can go stale until relaunch (there is
+no public API to cancel it); after a Sparkle self-update `brew list` lags until
+`brew upgrade --greedy-auto-updates`; `SURequireSignedFeed` is deferred until the key handling
+has run through a few releases; the toast-from-Settings gap (Leave Room and Join with an Invite
+toast into a collapsed panel) predates this work and is filed, not fixed.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between
@@ -1231,7 +1346,8 @@ what is real — as of the decision date, none of this is built.
 3. **No backend, deliberately.** Sync rides MQTT retained messages on any standard broker — a
    managed free tier or the team's own container. There is no Notchboard server: nothing of
    ours to deploy, update, back up or breach, and the app cannot even tell which broker it is
-   talking to.
+   talking to. The in-app update check reads a public file from GitHub Releases; that is a
+   download, not a server of ours (§14.5, decision 7).
 4. **Secrets are end-to-end encrypted wherever they travel.** In a room: ciphertext under a
    key derived from the room password. In an export: ciphertext under a mandatory export
    password. At rest: the Keychain, as today. Plaintext secrets never leave a Mac.
@@ -1362,6 +1478,12 @@ version-skew coordination. Revisit before any self-hosting pilot.
    "in use by tom", "use + copy", "in use · 12 min ago". Internal identifiers
    (`claimedBy`, `claimOrRelease`, …) keep their names; only labels, toasts, tooltips,
    notifications and settings copy follow the rule.
+7. **Updates come from GitHub Releases through Sparkle** (2026-09-04, §13.20). An update check
+   is a read of a public file that holds no state about the user, is disclosed in Settings and
+   the security model, and has an off switch. It is not the backend §14.1.3 forbids: nothing of
+   ours runs there and no state of ours lives there. Losing GitHub costs the update path and
+   nothing else — installed copies, rooms and catalogues carry on — where losing a backend of
+   ours would take the product with it.
 
 ### 14.6 The backend trigger list (equals the paid tier)
 

@@ -17,6 +17,7 @@ while. What works today is a personal tap:
 
 ```bash
 brew tap thepearl/tap
+brew trust thepearl/tap
 brew install --cask notchboard
 ```
 
@@ -25,6 +26,9 @@ or, in one line:
 ```bash
 brew install --cask thepearl/tap/notchboard
 ```
+
+Homebrew 6 refuses to load anything from a third-party tap it has not been told to trust,
+which is what the middle line is for. The one-liner trusts the cask on its own.
 
 That tap already exists at `github.com/thepearl/homebrew-tap` (it currently carries the
 `xcode-janitor-mcp` formula). Adding `Casks/notchboard.rb` to it is the whole job on the
@@ -120,31 +124,86 @@ git tag v1.1
 git push origin v1.1
 ```
 
-That one push builds, signs, notarises, staples, bumps the tap and publishes the GitHub
-release, in that order. The tap is bumped before the release is published so the pin never
-lags the download it describes, and the separate "Cask checksum" workflow re-verifies the
-pin against the published asset as an independent check.
+That one push builds, signs, notarises, staples, generates the update feed, bumps the tap
+and publishes the GitHub release, in that order. The release carries three assets: the zip,
+`appcast.xml` (the feed a running copy reads to learn about the release, see below) and
+`THIRD-PARTY-NOTICES.md`. Its body is the matching section of the changelog. The tap is
+bumped before the release is published so the pin never lags the download it describes, and
+the separate "Cask checksum" workflow re-verifies the pin against the published asset as an
+independent check.
 
-The workflow needs six repository secrets, listed in its header comment: the Developer ID
+The workflow needs seven repository secrets, listed in its header comment: the Developer ID
 certificate as a base64 `.p12` with its password, the App Store Connect API key (key id,
-issuer id and the `.p8` contents) for notarytool, and a fine-grained token with write
-access to the tap. When that token expires, releases fail at the tap step until it is
-replaced.
+issuer id and the `.p8` contents) for notarytool, a fine-grained token with write access to
+the tap, and `SPARKLE_PRIVATE_KEY`, the EdDSA private key exported with `generate_keys -x`
+that signs every update. When the tap token expires, releases fail at the tap step until it
+is replaced.
+
+Two things must agree, or the job fails before the build starts. The tag must equal
+`MARKETING_VERSION`, which has exactly two numeric components (`1.2`, never `1.2.1`, a
+hotfix bumps the second number). The changelog at `website/content/docs/changelog/index.mdx`
+must have a `## <version> (<date>)` section, because that section becomes the release body
+and the in-app release notes. A third check comes later, in the appcast step after
+notarisation: the build number, derived from the version as `MAJOR × 10000 + MINOR × 100`,
+so 1.2 is 10200, has to be greater than the one in the currently published feed.
 
 Running the same workflow from the Actions tab is a dry run. It builds, signs and
 notarises for real, verifies write access to the tap without pushing, and uploads the
-finished zip as a workflow artifact instead of publishing anything. Use it after rotating
-any of the secrets. The pipeline was first proven end to end this way on 2026-08-20.
+finished zip, the appcast and the release notes as a workflow artifact instead of publishing
+anything. Use it after rotating any of the secrets. A dispatch run takes two optional
+inputs, `build_number` and `download_url_prefix`, which the rehearsal below relies on. The
+pipeline was first proven end to end this way on 2026-08-20.
+
+## The update feed
+
+`appcast.xml` is the file a running copy fetches to learn that a newer release exists. It
+describes the release: version and build number, the URL and byte length of the zip, an
+EdDSA signature over the zip, and the release notes. The release job generates it with
+Sparkle's `generate_appcast` and attaches it to the GitHub release next to the zip.
+
+The app's `SUFeedURL` is
+`https://github.com/thepearl/notchboard/releases/latest/download/appcast.xml`. That is
+GitHub's latest-release redirector: two redirects land on the asset host, the response is
+never cached, and `gh release create --latest` pins which release it points at, so "latest"
+is always the newest version. The enclosure URL inside the feed stays versioned
+(`releases/download/v1.2/notchboard-1.2.zip`).
+
+Sparkle compares `CFBundleVersion`, the build number, to decide whether the feed is newer
+than the running copy, and shows `CFBundleShortVersionString`, the marketing version, to
+the user. That is why the build number is derived from the version and must always go up.
+
+Release notes are the changelog section for that version, embedded in the feed as Markdown.
+The changelog therefore stays plain Markdown, with no MDX components, because the same text
+renders in the update dialog.
+
+### The signing key
+
+The EdDSA key pair was generated once with Sparkle's `generate_keys`, which stores the
+private key in the maintainer's login Keychain and prints the public half that ships in
+`Info.plist` as `SUPublicEDKey`. `generate_keys -x <file>` exports the private key. That
+export is both the `SPARKLE_PRIVATE_KEY` repository secret and the recovery copy in the
+password manager. On a new Mac, `generate_keys -f <file>` imports it back into the Keychain.
+
+If the private key is lost, rotation works because releases are Developer ID signed. Sparkle
+accepts an update whose Apple signature matches the running copy's and then trusts the new
+public key that update carries, so one release with a fresh key pair moves every installed
+copy over. Removing the key is not possible: a copy that shipped with a public key refuses
+any update without a matching signature.
+
+`SURequireSignedFeed` is deferred. It protects the feed metadata only, and it needs
+`SUVerifyUpdateBeforeExtraction` alongside it.
 
 ## Release checklist
 
-CI executes steps 3 to 9 on a tag push, and they are kept spelled out here because they
+CI executes steps 3 to 10 on a tag push, and they are kept spelled out here because they
 are what the workflow does, and because they are the fallback when CI is unavailable.
-Steps 1, 2 and 10 stay yours either way. Steps 4 to 6 need the paid account when run by
-hand.
+Steps 1, 2 and 11 stay yours either way. Steps 4 to 6 need the paid account when run by
+hand, and step 7 needs the private key.
 
 1. Decide the version. `MARKETING_VERSION` in the project is the source of truth, and
-   `scripts/release.sh` reads it unless you pass `--version`.
+   `scripts/release.sh` reads it unless you pass `--version`. Bump it and write the
+   `## <version> (<date>)` section of the changelog in the same commit. The tag must equal
+   the version, and the release fails without the changelog section.
 
 2. Confirm the tree is green.
 
@@ -161,16 +220,25 @@ hand.
 
    It builds Release for arm64 and x86_64, copies the app to `build/release/`, zips it with
    `ditto -c -k --keepParent`, prints the sha256, and then prints the exact commands for
-   steps 4 to 6 with your paths already filled in. It is safe to re-run and it never touches
+   steps 4 to 7 with your paths already filled in. It is safe to re-run and it never touches
    codesign, notarytool or stapler itself.
+
+   The build number comes from the version (`MAJOR × 10000 + MINOR × 100`) unless you pass
+   `--build-number`, and it lands in the app as `CFBundleVersion`. The script refuses a
+   `--version` that differs from the project's `MARKETING_VERSION`.
 
    `ditto` rather than `zip` is not a preference. The Finder's Compress and `ditto` both
    preserve the symlinks and extended attributes inside an app bundle. Plain `zip` does not,
    and a bundle that lost them fails signature validation after the round trip.
 
 4. Sign with Developer ID. Find your identity with
-   `security find-identity -v -p codesigning`, then use the `codesign` line the script
-   printed. Re-zip afterwards, because the signature lives inside the bundle.
+   `security find-identity -v -p codesigning`, then use the `codesign` lines the script
+   printed, in their order. Sparkle's nested code goes first, inside out:
+   `Sparkle.framework/Versions/B/XPCServices/Installer.xpc`, then `Downloader.xpc` in the
+   same folder with `--preserve-metadata=entitlements`, then `Versions/B/Autoupdate`,
+   `Versions/B/Updater.app` and the framework itself. The dylibs follow, then the app, every
+   one with `--options runtime --timestamp`. Re-zip afterwards, because the signature lives
+   inside the bundle.
 
 5. Notarise and wait. Store the App Store Connect credential once with
    `xcrun notarytool store-credentials`, then submit with `--wait`. A rejection comes back
@@ -180,27 +248,94 @@ hand.
    with `spctl --assess --type execute --verbose`. Stapling is what lets a first launch
    succeed on a Mac that is offline.
 
-7. Take the sha256 of the final zip. Every re-zip changes it, so only the last one counts.
-
-8. Publish the release.
+7. Generate the appcast, from the final zip. Put that zip and the release notes, the
+   changelog section saved as `notchboard-1.2.md`, alone in one directory, and pipe the
+   private key in:
 
    ```bash
-   gh release create "v1.0" build/release/notchboard-1.0.zip \
-     --title "v1.0" --notes "..."
+   printf '%s' "$SPARKLE_PRIVATE_KEY" | generate_appcast \
+     --ed-key-file - \
+     --download-url-prefix https://github.com/thepearl/notchboard/releases/download/v1.2/ \
+     --embed-release-notes \
+     --link https://github.com/thepearl/notchboard \
+     --full-release-notes-url https://thepearl.github.io/notchboard/changelog/ \
+     -o build/appcast/appcast.xml \
+     build/appcast
    ```
 
-9. Update `Casks/notchboard.rb` in this repo with the new `version` and `sha256`, and copy
-   the same file into `thepearl/homebrew-tap` under `Casks/notchboard.rb`. Keeping a copy
-   here is what makes the cask reviewable alongside the code that decides its zap paths.
+   `generate_appcast` comes from the Sparkle release matching the version the project pins,
+   which is also what the workflow downloads.
 
-10. Verify the whole path on a machine that has never run the app.
+8. Take the sha256 of the final zip. Every re-zip changes it, so only the last one counts.
+
+9. Bump the tap, before publishing, so its pin never lags the download it describes. The
+   workflow copies the in-repo `Casks/notchboard.rb` into `thepearl/homebrew-tap` under
+   `Casks/notchboard.rb` and stamps `version` and `sha256` on the copy, so the two lines in
+   this repo are placeholders. By hand, do the same: copy the file, then stamp it with the
+   checksum from step 8. Keeping the cask here is what makes it reviewable alongside the
+   code that decides its zap paths.
+
+10. Publish the release, with the feed and the notices next to the zip. The Cask checksum
+    workflow runs on publication and compares the tap against what was just published, so
+    the tap has to be current by now.
 
     ```bash
-    brew tap thepearl/tap
-    brew install --cask notchboard
+    gh release create "v1.2" \
+      build/release/notchboard-1.2.zip build/appcast/appcast.xml THIRD-PARTY-NOTICES.md \
+      --title "v1.2" --notes-file build/appcast/notchboard-1.2.md --latest --verify-tag
     ```
 
-    Then launch it. A dialog at this point means step 4, 5 or 6 did not take.
+11. Verify the whole path on a machine that has never run the app.
+
+    ```bash
+    brew install --cask thepearl/tap/notchboard
+    ```
+
+    Then launch it. A dialog at this point means step 4, 5 or 6 did not take. Open Settings
+    and confirm the Updates section reads `up to date`, which proves the published feed is
+    reachable and names this version.
+
+## Rehearsing the first Sparkle release
+
+Done once, before tagging 1.2, because it is the first release a running copy installs over
+itself. It needs a second Mac to hold a room, and a throwaway public repository for the
+scratch release.
+
+1. Dispatch the release workflow twice from the Actions tab. Run A keeps the default build
+   number. Run B sets `build_number` higher (10300, say) and `download_url_prefix` to the
+   download URL of a release on the throwaway repository. Both prove signing, notarisation,
+   the key match and appcast generation. Create the scratch release on the throwaway
+   repository from run B's zip and appcast.
+
+2. Install run A's app by dragging it into Applications with the Finder. A Terminal move of
+   a quarantined download can leave it translocated, and the update then asks you to move
+   the app to Applications. Grant Accessibility, switch on Launch at login, and join a room
+   from the second Mac.
+
+3. Point the installed copy at the scratch feed. The default is honoured before
+   `Info.plist`, with a warning in the log:
+
+   ```bash
+   defaults write flourix.notchboard SUFeedURL "<scratch appcast url>"
+   defaults delete flourix.notchboard SULastCheckTime
+   ```
+
+   The second line matters: a launch check runs only when the last one is older than a day,
+   so without it the first launch after the switch does nothing. Relaunch, then run T20 to
+   T30 of the [update test plan](./update-test-plan.mdx).
+
+4. Clean up.
+
+   ```bash
+   defaults delete flourix.notchboard SUFeedURL
+   ```
+
+   Delete the scratch release. Delete the rehearsal app too: its build number is higher than
+   the real 1.2's, so neither Sparkle nor brew would ever replace it. Reinstall from brew.
+
+5. Bump `MARKETING_VERSION` to 1.2 and write the changelog section in one commit, merge, and
+   tag `v1.2`. Copies on 1.1 have no updater, so the release notes and the README carry
+   `brew upgrade --cask thepearl/tap/notchboard`. From 1.2 on, the app takes over.
 
 ## Setting up the tap for the first time
 
@@ -274,3 +409,8 @@ intended outcome when you are removing the app and not a thing to do casually ot
 - https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap
 - https://developer.apple.com/programs/
 - https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
+- https://sparkle-project.org/documentation/publishing/
+- https://sparkle-project.org/documentation/sandboxing/
+- https://sparkle-project.org/documentation/gentle-reminders/
+- https://docs.brew.sh/Tap-Trust
+- https://docs.github.com/en/rest/releases/releases

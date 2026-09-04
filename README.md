@@ -6,8 +6,9 @@ emulator window, follows that window as it moves, and opens into a searchable ca
 Pick an account, copy it or fire it straight into the booted app as a deeplink, and mark it "in use"
 so nobody logs in behind you.
 
-There is no backend. The app is local-first, and teams that want live sharing join an
-end-to-end-encrypted room on an MQTT broker of their choosing.
+There is no backend. The app is local-first, teams that want live sharing join an
+end-to-end-encrypted room on an MQTT broker of their choosing, and updates come straight from this
+repository's releases page.
 
 <h4 align="center">
   <a href="https://github.com/thepearl/notchboard/actions/workflows/ci.yml">
@@ -37,8 +38,9 @@ end-to-end-encrypted room on an MQTT broker of their choosing.
 brew install --cask thepearl/tap/notchboard
 ```
 
-The download is signed and notarised, so the first launch is a double click. There is no Dock icon,
-so look for the square in the menu bar. No Homebrew? Grab `notchboard-<version>.zip` from the
+The download is signed and notarised, so the first launch is a double click. It keeps itself up to
+date from the releases page. There is no Dock icon, so look for the square in the menu bar. No
+Homebrew? Grab `notchboard-<version>.zip` from the
 [latest release](https://github.com/thepearl/notchboard/releases/latest) instead.
 
 ## 📚 Documentation
@@ -68,8 +70,8 @@ xcodebuild -project notchboard.xcodeproj -scheme notchboard -configuration Debug
 ```
 
 Xcode 26 or later, no Apple account needed - signing is ad-hoc, so a fresh clone builds and runs
-as-is. Docking needs the Accessibility permission, and a self-built copy must re-grant it after
-every rebuild;
+as-is. A copy you build yourself never checks for updates. Docking needs the Accessibility
+permission, and a self-built copy must re-grant it after every rebuild;
 [the installation guide](https://thepearl.github.io/notchboard/documentation/getting-started/installation/)
 has the detail.
 

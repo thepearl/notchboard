@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Debug-only entitlements (CODE_SIGN_ENTITLEMENTS is set in the app target's Debug
+	  configuration and nowhere else). Local builds are ad-hoc signed and carry the hardened
+	  runtime, whose library validation only admits code that is Apple's or shares the main
+	  executable's Team ID. An ad-hoc signature has no Team ID, so an ad-hoc Sparkle.framework
+	  cannot load into an ad-hoc notchboard.app without this exception (Sparkle documents the
+	  same fix for "sign to run locally" builds; vision.md section 13.20). Release builds keep
+	  library validation: release.yml re-signs everything with the Developer ID, and its
+	  re-sign carries no entitlements at all.
+
+	  Kept OUTSIDE the synchronized notchboard/ folder for the same reason as Info.plist: inside
+	  it the build would also copy the file into Contents/Resources.
+	-->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
