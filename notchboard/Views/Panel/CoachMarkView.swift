@@ -14,7 +14,7 @@ struct CoachMarkView: View {
                 .font(NBFont.mono(10))
                 .foregroundStyle(NBColor.green)
 
-            Text("Notchboard found your Simulator and attached itself. Click the notch to open your catalogue.")
+            Text("Notchboard found your simulator and attached itself. Click the notch to open your catalogue.")
                 .font(NBFont.ui(11))
                 .foregroundStyle(NBColor.textFieldValue)
                 .lineSpacing(4)

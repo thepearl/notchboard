@@ -16,10 +16,29 @@
 //  ~3Hz the rest of the time. `onUpdate` lets the owner reposition the moment a change
 //  lands instead of waiting for a timer of its own.
 //
+//  Two Device Hub facts shape the window choice (vision.md §13.21). Its LaunchServices
+//  record can report `processIdentifier == -1` for a process that is plainly running, so
+//  the pid is resolved through the window server when the workspace has none. And it owns
+//  windows that are not device windows — the hub window with its sidebar, hidden tabs,
+//  full-width 33pt strips, an off-screen helper — so `.focusedOrFirst` narrows to the
+//  on-screen, device-sized ones before it prefers focus. Simulator.app has one kind of
+//  window and pays for none of this: a single AX window is chosen without a second read.
+//
 
 import AppKit
 import ApplicationServices
 import Observation
+
+/// One of a host's AX windows, described by plain values so the choice is unit-testable.
+nonisolated struct WindowCandidate: Sendable, Equatable {
+    /// The AX title, read only for kinds that select `.titled`.
+    var title: String?
+    /// The AX frame (top-left origin), read when the choice needs geometry.
+    var frame: CGRect?
+    /// Whether the window server lists this window on screen. `nil` when the tracker had
+    /// no window-server information to match against, which must change nothing.
+    var isOnscreen: Bool?
+}
 
 @Observable
 final class DeviceWindowTracker {
@@ -66,6 +85,16 @@ final class DeviceWindowTracker {
     /// True while an AX read is in flight on a background task — skips further ticks so
     /// reads never pile up behind a slow/hung host process.
     private var isReadingFrame = false
+
+    /// The host the last poll found, kept so a finished background read can be checked
+    /// against the process it was started for rather than looked up again by pid — which
+    /// fails outright when the workspace reports the pid as -1.
+    private var hostApp: NSRunningApplication?
+
+    /// The pid resolved through the window server when the workspace had none for the
+    /// host. Cached because the resolution walks every window on the machine; revalidated
+    /// on each poll and dropped when the process is gone.
+    private var resolvedHostPID: pid_t?
 
     func start() {
         stop()
@@ -174,20 +203,23 @@ final class DeviceWindowTracker {
             return
         }
 
-        guard let hostApp = NSWorkspace.shared.runningApplications.first(where: {
+        guard let host = NSWorkspace.shared.runningApplications.first(where: {
             kind.matches($0)
         }) else {
+            hostApp = nil
+            resolvedHostPID = nil
             setRunning(false)
             setFrame(nil)
             setTitle(nil)
             return
         }
 
+        hostApp = host
         setRunning(true)
 
         // Hidden (⌘H) or minimized — both are "put the device down for later", and both
         // mean there's no visible window to dock against.
-        if hostApp.isHidden {
+        if host.isHidden {
             setFrame(nil)
             setTitle(nil)
             return
@@ -197,7 +229,7 @@ final class DeviceWindowTracker {
         // debugger — never make them from the main thread. NSScreen, conversely, must be
         // read on the main thread, so the flip height is captured here and passed along.
         guard !isReadingFrame else { return }
-        guard let screenHeight = Self.primaryScreenHeight else {
+        guard let screenHeight = Self.primaryScreenHeight, let pid = hostProcessIdentifier(for: host) else {
             // Through setFrame like every other write: a direct assignment here skipped the
             // equality guard (re-rendering observers at poll rate) and the onUpdate callback.
             setFrame(nil)
@@ -205,10 +237,11 @@ final class DeviceWindowTracker {
             return
         }
         isReadingFrame = true
-        let pid = hostApp.processIdentifier
         let hostKind = kind
         Task.detached(priority: .userInitiated) { [weak self] in
-            let read = Self.frontmostWindowFrame(forProcess: pid, kind: hostKind, primaryScreenHeight: screenHeight)
+            let read = Self.frontmostWindowFrame(
+                forProcess: pid, kind: hostKind, primaryScreenHeight: screenHeight
+            )
             // `weak self` is unwrapped here rather than inside the MainActor closure: the
             // closure would otherwise capture the mutable optional binding itself, which
             // Swift 6 rejects.
@@ -216,16 +249,50 @@ final class DeviceWindowTracker {
         }
     }
 
+    /// The pid to hand to `AXUIElementCreateApplication`. Normally the workspace's own;
+    /// Device Hub's LaunchServices record reports -1 for a live process (observed on
+    /// macOS 27 / Xcode 27 — the app launches through a `DevicesTrampoline` executable),
+    /// and AX on -1 fails with `invalidUIElement`. The window server still knows the real
+    /// owner of every window, and `NSRunningApplication(processIdentifier:)` on that pid
+    /// resolves the bundle id correctly, so that is the fallback. The result is cached and
+    /// revalidated per poll: the process behind a cached pid must still exist and still
+    /// be this kind of host.
+    private func hostProcessIdentifier(for host: NSRunningApplication) -> pid_t? {
+        if host.processIdentifier > 0 {
+            resolvedHostPID = nil
+            return host.processIdentifier
+        }
+        if let cached = resolvedHostPID,
+           let app = NSRunningApplication(processIdentifier: cached), !app.isTerminated, kind.matches(app) {
+            return cached
+        }
+        resolvedHostPID = Self.windowOwnerProcessIdentifier(matching: kind)
+        return resolvedHostPID
+    }
+
+    /// Walks the window server's owner pids for a process of this kind. Every window on
+    /// the machine, not just on-screen ones: a host on another Space is still running.
+    private static func windowOwnerProcessIdentifier(matching kind: DeviceKind) -> pid_t? {
+        let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID)
+        guard let windows = list as? [[String: Any]] else { return nil }
+        var seen = Set<pid_t>()
+        for window in windows {
+            guard let owner = window[kCGWindowOwnerPID as String] as? pid_t, owner > 0,
+                  seen.insert(owner).inserted,
+                  let app = NSRunningApplication(processIdentifier: owner), !app.isTerminated,
+                  kind.matches(app) else { continue }
+            return owner
+        }
+        return nil
+    }
+
     /// Adopts the result of a background AX read. A read that raced the host quitting,
     /// being hidden/minimized, or having permission revoked must not resurrect a stale
     /// frame, so this re-checks the same conditions `poll()` gates on against current state.
     private func applyPolledFrame(_ read: (frame: CGRect, title: String?)?, pid: pid_t) {
         isReadingFrame = false
-        guard isRunning,
-              let app = NSWorkspace.shared.runningApplications.first(where: {
-                  $0.processIdentifier == pid
-              }),
-              !app.isHidden else { return }
+        guard isRunning, let host = hostApp, !host.isTerminated, !host.isHidden,
+              (resolvedHostPID ?? host.processIdentifier) == pid else { return }
         setFrame(read?.frame)
         setTitle(read?.title)
     }
@@ -239,22 +306,58 @@ final class DeviceWindowTracker {
         return primary?.frame.height
     }
 
+    /// Windows shorter than this are never device windows. Device Hub owns full-width 33pt
+    /// strips (observed through the window server on macOS 27); the smallest device window,
+    /// an Apple Watch at 50%, is several times taller with its title bar.
+    nonisolated static let minimumDockableHeight: CGFloat = 60
+
+    /// How far an AX frame may differ from a window-server bounds to count as the same
+    /// window. The two APIs report the same rectangle in the same top-left space; the
+    /// tolerance only absorbs rounding.
+    nonisolated static let onscreenMatchTolerance: CGFloat = 1
+
     /// Which of the host's windows to dock to. Pure so the emulator's multi-window hazard
-    /// (device window + Qt toolbar + extended controls, focus anywhere among them) is
-    /// unit-testable without a process. `titles` and `focusedIndex` describe the host's AX
-    /// windows in order; the return value indexes into the same order.
+    /// (device window + Qt toolbar + extended controls, focus anywhere among them) and
+    /// Device Hub's (hub window, hidden tabs, strips, off-screen helpers) are unit-testable
+    /// without a process. `candidates` and `focusedIndex` describe the host's AX windows in
+    /// order; the return value indexes into the same order.
     nonisolated static func chooseWindowIndex(
-        titles: [String?], focusedIndex: Int?, selection: WindowSelection, kind: DeviceKind
+        candidates: [WindowCandidate], focusedIndex: Int?, selection: WindowSelection, kind: DeviceKind
     ) -> Int? {
-        guard !titles.isEmpty else { return nil }
+        guard !candidates.isEmpty else { return nil }
         switch selection {
         case .focusedOrFirst:
-            // Prefer the app's focused window if it reports one; otherwise the first.
-            return focusedIndex ?? 0
+            // Narrow to windows that can be docked to at all: on screen as far as the window
+            // server knows, and tall enough to be a device. When that leaves nothing — no
+            // window-server information, or the host sits on another Space — fall back to
+            // every window, which is exactly the Simulator.app behaviour of old.
+            let dockable = candidates.indices.filter { isDockable(candidates[$0]) }
+            let pool = dockable.isEmpty ? Array(candidates.indices) : dockable
+            // Prefer the app's focused window if it reports one in the pool; otherwise the first.
+            if let focusedIndex, pool.contains(focusedIndex) { return focusedIndex }
+            return pool.first
         case .titled:
             // Focus proves nothing here — a parse failure on every title means no device
             // window, never a guess at the toolbar.
-            return titles.firstIndex { kind.matchesDeviceWindowTitle($0) }
+            return candidates.firstIndex { kind.matchesDeviceWindowTitle($0.title) }
+        }
+    }
+
+    /// A candidate the window server lists on screen (or gave no verdict on) with a
+    /// device-sized frame (or no frame to judge).
+    nonisolated static func isDockable(_ candidate: WindowCandidate) -> Bool {
+        if candidate.isOnscreen == false { return false }
+        if let frame = candidate.frame, frame.height < minimumDockableHeight { return false }
+        return true
+    }
+
+    /// Whether an AX frame matches one of the window server's on-screen bounds.
+    nonisolated static func isOnscreen(_ frame: CGRect, among onscreenBounds: [CGRect]) -> Bool {
+        onscreenBounds.contains { bounds in
+            abs(bounds.minX - frame.minX) <= onscreenMatchTolerance
+                && abs(bounds.minY - frame.minY) <= onscreenMatchTolerance
+                && abs(bounds.width - frame.width) <= onscreenMatchTolerance
+                && abs(bounds.height - frame.height) <= onscreenMatchTolerance
         }
     }
 
@@ -279,9 +382,19 @@ final class DeviceWindowTracker {
         // (Pattern matching, not ==: the synthesized Equatable is main-actor-isolated
         // under the project's default isolation, and this runs off the main actor.)
         let wantsTitles = if case .titled = selection { true } else { false }
-        let titles: [String?] = wantsTitles
-            ? windows.map { axString($0, kAXTitleAttribute) }
-            : Array(repeating: nil, count: windows.count)
+        // Geometry for every window is read only when there is a choice to make among
+        // several by geometry — Device Hub's shape. Simulator.app's single window pays nothing.
+        let wantsGeometry = if case .focusedOrFirst = selection { windows.count > 1 } else { false }
+        let onscreenBounds = wantsGeometry ? onscreenWindowBounds(forProcess: pid) : []
+
+        let candidates: [WindowCandidate] = windows.map { window in
+            let frame = wantsGeometry ? axFrame(window) : nil
+            return WindowCandidate(
+                title: wantsTitles ? axString(window, kAXTitleAttribute) : nil,
+                frame: frame,
+                isOnscreen: frame.map { isOnscreen($0, among: onscreenBounds) }
+            )
+        }
 
         var focusedIndex: Int?
         if case .focusedOrFirst = selection {
@@ -294,7 +407,7 @@ final class DeviceWindowTracker {
         }
 
         guard let index = chooseWindowIndex(
-            titles: titles, focusedIndex: focusedIndex, selection: selection, kind: kind
+            candidates: candidates, focusedIndex: focusedIndex, selection: selection, kind: kind
         ) else {
             return nil
         }
@@ -306,15 +419,37 @@ final class DeviceWindowTracker {
             return nil
         }
 
-        guard let origin = axPoint(window, kAXPositionAttribute),
-              let size = axSize(window, kAXSizeAttribute) else {
+        guard let axRect = candidates[index].frame ?? axFrame(window) else {
             return nil
         }
 
         // AX coordinates: origin is top-left of the primary screen, y grows downward.
         // AppKit coordinates: origin is bottom-left, y grows upward.
-        let appKitY = primaryScreenHeight - origin.y - size.height
-        return (CGRect(x: origin.x, y: appKitY, width: size.width, height: size.height), titles[index])
+        let appKitY = primaryScreenHeight - axRect.minY - axRect.height
+        let frame = CGRect(x: axRect.minX, y: appKitY, width: axRect.width, height: axRect.height)
+        return (frame, candidates[index].title)
+    }
+
+    /// The window server's on-screen, normal-level, visible windows for a process, as
+    /// top-left-origin bounds — the same space AX reports in. Needs no permission of its own.
+    nonisolated private static func onscreenWindowBounds(forProcess pid: pid_t) -> [CGRect] {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return [] }
+        return windows.compactMap { window in
+            guard window[kCGWindowOwnerPID as String] as? pid_t == pid,
+                  (window[kCGWindowLayer as String] as? Int ?? 0) == 0,
+                  (window[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0,
+                  let boundsDict = window[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict) else { return nil }
+            return bounds
+        }
+    }
+
+    nonisolated private static func axFrame(_ window: AXUIElement) -> CGRect? {
+        guard let origin = axPoint(window, kAXPositionAttribute),
+              let size = axSize(window, kAXSizeAttribute) else { return nil }
+        return CGRect(origin: origin, size: size)
     }
 
     nonisolated private static func axPoint(_ element: AXUIElement, _ attribute: String) -> CGPoint? {

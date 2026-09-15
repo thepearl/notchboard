@@ -406,7 +406,7 @@ private struct PermissionStep: View {
             Text("one permission, then we dock")
                 .font(NBFont.ui(15, weight: .bold))
                 .foregroundStyle(NBColor.textPrimary)
-            Text("notchboard uses the macOS accessibility API to find your Simulator window and follow it. nothing is recorded or captured.")
+            Text("notchboard uses the macOS accessibility API to find your simulator window and follow it. nothing is recorded or captured.")
                 .font(NBFont.ui(11))
                 .foregroundStyle(NBColor.textSecondary)
                 .lineSpacing(3)

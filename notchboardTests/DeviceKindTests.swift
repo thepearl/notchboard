@@ -2,11 +2,12 @@
 //  DeviceKindTests.swift
 //  notchboardTests
 //
-//  Guards the pure identity rules for the Android emulator, which are researched but not
-//  yet verified against a live AVD: the qemu executable-name predicate, and the anchored
-//  device-window title parse that both selects the window and yields the console port
-//  joining it to its adb serial. If the emulator ever changes either, these fixtures are
-//  the single place the facts live.
+//  Guards the pure identity rules for both hosts. iOS: the two bundle ids that are both live
+//  today — Simulator.app up to Xcode 26 and Device Hub from Xcode 27 (vision.md §13.21) — so a
+//  Mac on either Xcode docks and a new Xcode cannot silently unhost the panel again. Android:
+//  the qemu executable-name predicate, and the anchored device-window title parse that both
+//  selects the window and yields the console port joining it to its adb serial. If either
+//  platform ever changes these facts, these fixtures are the single place they live.
 //
 
 import Foundation
@@ -16,6 +17,32 @@ import Testing
 @Suite("Device kind identity")
 struct DeviceKindTests {
 
+    @Test("Both iOS host bundle ids match", arguments: [
+        "com.apple.iphonesimulator", // Simulator.app, Xcode ≤ 26
+        "com.apple.dt.Devices",      // DeviceHub.app, Xcode 27+
+    ])
+    func simulatorBundleIDsMatch(bundleID: String) {
+        #expect(DeviceKind.matchesSimulatorBundleID(bundleID))
+        #expect(DeviceKind.simulatorBundleIDs.contains(bundleID))
+    }
+
+    @Test("Other Xcode-family and unrelated bundle ids never match", arguments: [
+        "com.apple.dt.Xcode",
+        "com.apple.dt.DevicesSystemUpdater", // Device Hub's nested helper app
+        "com.apple.CoreSimulator.SimRenderingServices.SimRenderServer",
+        "com.google.android.studio",
+        "flourix.notchboard",
+        "",
+    ])
+    func otherBundleIDsRejected(bundleID: String) {
+        #expect(!DeviceKind.matchesSimulatorBundleID(bundleID))
+    }
+
+    @Test("A missing bundle id is never the iOS host")
+    func nilBundleIDRejected() {
+        #expect(!DeviceKind.matchesSimulatorBundleID(nil))
+    }
+
     @Test("Real qemu executable names match", arguments: [
         "qemu-system-aarch64", "qemu-system-x86_64", "qemu-system-aarch64-headless",
     ])
@@ -24,7 +51,7 @@ struct DeviceKindTests {
     }
 
     @Test("Other executables never match", arguments: [
-        "Simulator", "emulator", "qemu-img", "studio", "notqemu-system-aarch64", "",
+        "Simulator", "DeviceHub", "emulator", "qemu-img", "studio", "notqemu-system-aarch64", "",
     ])
     func otherNamesRejected(name: String) {
         #expect(!DeviceKind.matchesEmulatorExecutableName(name))

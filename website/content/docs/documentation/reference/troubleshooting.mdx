@@ -18,11 +18,12 @@ Simulator is probably not running. Open the menu-bar item and choose **Show Pane
 
 <summary>Accessibility is granted but nothing docks</summary>
 
-Three things to check, in order.
+Four things to check, in order.
 
 1. The entry in System Settings points at the app you are actually launching. If you granted it to a DerivedData build and then copied a new build to `/Applications`, remove the stale entry with the minus button and grant again.
 2. Quit and relaunch Notchboard. After a rebuild, macOS sometimes needs that before it re-reads the grant.
-3. The Simulator window is actually on screen. A minimised or hidden Simulator has no frame to dock against.
+3. The simulator window is actually on screen. A minimised or hidden Simulator has no frame to dock against.
+4. On Xcode 27, Device Hub replaces Simulator.app and Notchboard 1.3 or later recognises it. Earlier versions only know Simulator.app and never dock to Device Hub.
 
 </details>
 
