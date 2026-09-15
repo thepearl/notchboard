@@ -1,7 +1,8 @@
 # Using Notchboard
 
-Notchboard docks a catalogue of test accounts and fixtures to the iOS Simulator window, so
-you stop hunting for a working login in chat. This guide walks the whole app. For getting it
+Notchboard docks a catalogue of test accounts and fixtures to the iOS simulator window
+(Simulator.app up to Xcode 26, Device Hub from Xcode 27), so you stop hunting for a working
+login in chat. This guide walks the whole app. For getting it
 built and running, see [INSTALL.md](INSTALL.md).
 
 The app has no Dock icon. Its two entry points are the menu-bar item and the panel itself.
@@ -29,6 +30,10 @@ This outranks docking, so it stays put until you turn it off again.
 Notchboard polls the Simulator window position through the Accessibility API and repositions
 itself as you drag. Polling is adaptive: roughly 60 Hz while a drag is possible, 10 Hz while
 Simulator is merely frontmost, about 3 Hz otherwise.
+
+Xcode 27 replaced Simulator.app with Device Hub, one window with the device list on the left and
+the device on the right, plus tabs and a compact per-device mode. Notchboard recognises both apps
+and docks to whichever Device Hub window is on screen, skipping hidden tabs and its helper windows.
 
 The docked panel floats above other windows only while Simulator, the emulator, or Notchboard
 itself is frontmost. Switch to Chrome and the panel drops behind it, exactly as the Simulator

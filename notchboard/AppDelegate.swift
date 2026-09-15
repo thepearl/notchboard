@@ -583,12 +583,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// reach for the catalogue. Switch to Terminal and ⌃K is kill-line again on the next tick.
     /// Rectangle uses the same idea in reverse, unregistering its hotkeys while a chosen app
     /// is frontmost.
-    private static let hotKeyHostBundleIDs: Set<String> = [
-        DeviceKind.simulatorBundleID,
+    private static let hotKeyHostBundleIDs: Set<String> = DeviceKind.simulatorBundleIDs.union([
         "com.apple.dt.Xcode",
         "com.google.android.studio",
         Bundle.main.bundleIdentifier ?? "flourix.notchboard",
-    ]
+    ])
 
     /// True while the frontmost app is one Notchboard may claim chords around.
     private var hotKeyHostIsFrontmost: Bool {
@@ -624,11 +623,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var dockHostOrSelfIsFrontmost: Bool {
         guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-        if let bundleID = app.bundleIdentifier,
-           bundleID == DeviceKind.simulatorBundleID || bundleID == Bundle.main.bundleIdentifier {
-            return true
-        }
-        return DeviceKind.androidEmulator.matches(app)
+        if app.bundleIdentifier == Bundle.main.bundleIdentifier { return true }
+        return DeviceKind.iosSimulator.matches(app) || DeviceKind.androidEmulator.matches(app)
     }
 
     /// The menu title and the icon dot follow the update centre, from the same tick that
