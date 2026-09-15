@@ -452,7 +452,7 @@ jobs:
       # and, with the appcast and the notes, to rehearse an update against a scratch release.
       - name: Upload the dry-run artefact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: notchboard-${{ env.VERSION }}-build${{ env.BUILD_NUMBER }}-dryrun
           path: |
