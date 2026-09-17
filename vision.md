@@ -1328,6 +1328,71 @@ no public API to cancel it); after a Sparkle self-update `brew list` lags until
 has run through a few releases; the toast-from-Settings gap (Leave Room and Join with an Invite
 toast into a collapsed panel) predates this work and is filed, not fixed.
 
+### 13.21 Xcode 27's Device Hub: a second iOS host identity (2026-09-15)
+
+Xcode 27 removed Simulator.app. Its replacement is `DeviceHub.app`, inside Xcode's own
+Applications folder rather than the Developer one, bundle id `com.apple.dt.Devices`, process
+`DeviceHub`, launched through a `DevicesTrampoline` executable. Notchboard matched exactly one
+bundle id, so on macOS 27 / Xcode 27 it found no host at all: no docking, no chords, no panel-level
+switching, and the undocked fallback was the whole product. Xcode 26 users still run Simulator.app,
+so this is the sync `v` field's exception again — two identities live in the wild at once, and both
+are identity, not a compatibility shim for a retired one (§14.5).
+
+**What Device Hub is, observed on this Mac.** One SwiftUI window built on `NavigationSplitView`:
+a device source list on the left, the device drawn in a zoomable "DeviceCanvas" with a bezel
+"chrome" system on the right, an inspector, native tabs ("Open in New Tab"), "Open in New Window",
+a "Switch to compact window" mode that is the nearest thing to the old one-device window, and a
+"stays on top" option. Through the window server it owned six windows while one device window was
+visible: the 395×860 device window, four full-width 33pt strips at the top of the screen, and a
+500×500 window parked off screen. `simctl` survives with `openurl`, so the deeplink bridge needed
+nothing.
+
+**Two quirks, both handled in the tracker.** First, `NSWorkspace.runningApplications` (and
+`runningApplications(withBundleIdentifier:)`, and System Events, which is how the AX dump from a
+script came back empty) reports Device Hub with `processIdentifier == -1` while `lsappinfo` and
+`ps` agree it is a live pid. Handed to `AXUIElementCreateApplication`, -1 fails with
+`invalidUIElement`, so fixing the bundle id alone would still not dock. `hostProcessIdentifier(for:)`
+resolves the real pid through the window server's owner pids — `NSRunningApplication(processIdentifier:)`
+on the owner pid reports the bundle id correctly — cached and revalidated per poll. Second,
+`.focusedOrFirst` was written for a host whose every window is a device window. `chooseWindowIndex`
+now takes `WindowCandidate`s (title, AX frame, window-server on-screen verdict) and, for that
+selection, narrows to candidates the window server lists on screen with a frame at least
+`minimumDockableHeight` (60pt — the strips are 33, an Apple Watch at 50% several times taller)
+before preferring focus. Hidden tabs share the visible tab's frame but are not on screen; the
+off-screen helper is not on screen; the strips are too short. When nothing is dockable (the host on
+another Space, or no window-server answer) the pool is every window and the rule is the old
+focused-else-first, so Simulator.app users see no change, and a host with a single AX window skips
+the geometry read entirely. AppDelegate's hotkey-host set and the panel-level rule route through
+`DeviceKind` rather than naming a bundle id.
+
+**Copy and docs.** The user-facing "Simulator" (the app) became "simulator" (the device) in the coach
+mark, the onboarding permission step and the scheme dialog — the §13.19 rule that the user calls
+every platform a simulator, extended to the iOS one. INSTALL, USAGE, the website's installation and
+troubleshooting pages and the 1.2 changelog say which app goes with which Xcode.
+
+**Verification.** 375 tests in 71 suites (364 → 375) with no broker, no simulator and no
+emulator; the new `DeviceKindTests` cases pin both bundle ids and reject Device Hub's nested
+`DevicesSystemUpdater` helper, and `DeviceWindowSelectionTests` cover the hidden tab, the strips,
+the off-screen helper, focus on a non-dockable window, and the fallback that preserves the old rule.
+
+**Runtime, same day.** A Debug build granted Accessibility docked to the live Device Hub on the
+first launch: Device Hub's device window at x 486–881, the panel at x 881, flush and vertically
+centred, through the pid fallback (the workspace still said -1) and the on-screen narrowing. Two
+corrections from the run. The full-width 33pt strips are not Device Hub's: every app on macOS 27
+owns four of them, Notchboard included, so the height filter is a general macOS 27 fact rather than
+a Device Hub one. And a rebuilt ad-hoc binary stalls at startup behind a SecurityAgent Keychain
+prompt (new identity, stored secrets) until the user allows it — the panel window exists at 0×0
+until then, which reads exactly like "not docking" from outside.
+
+**Still not exercised:** the AX tree itself (the probe from the agent session had no grant, and the
+pid quirk hid the windows from System Events too), so unknown: what the device window's title
+carries (it may name the device, which would let the deeplink target a UDID instead of `booted`
+when several devices are booted — Device Hub's sidebar makes that routine), whether the docked
+edge of the full hub window is a useful place for the notch with the inspector open (the canvas
+frame would be the better anchor, and needs the AX identifiers), tabs, and how "stays on top"
+interacts with the panel dropping to `.normal`. Also untested: a Mac running macOS 26 with Xcode
+26, where the claim is no behaviour change.
+
 ## 14. Distribution and sync: the constitution (decided 2026-08-07)
 
 Binding product direction for how Notchboard reaches people and how state moves between

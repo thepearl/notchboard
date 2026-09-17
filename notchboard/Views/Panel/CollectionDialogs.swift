@@ -39,7 +39,7 @@ enum CollectionDialogs {
     static func promptForScheme(collectionName: String, current: String) -> String? {
         let alert = NSAlert()
         alert.messageText = "Debug URL scheme for “\(collectionName)”"
-        alert.informativeText = "“Login on sim” fires <scheme>://debug/login into the booted Simulator. Use the scheme your app's debug build registers — the NotchDemo sample uses notchdemo. Stored per collection, so each catalogue drives its own app. Leave empty to turn the button off."
+        alert.informativeText = "“Login on sim” fires <scheme>://debug/login into the booted simulator. Use the scheme your app's debug build registers — the NotchDemo sample uses notchdemo. Stored per collection, so each catalogue drives its own app. Leave empty to turn the button off."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
 

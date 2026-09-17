@@ -19,8 +19,9 @@ Or without Homebrew: download `notchboard-<version>.zip` from the
 Either way the build is signed with a Developer ID certificate, notarised by Apple and stapled, so
 the first launch is a normal one: macOS asks its standard once-only confirmation for an app from
 the internet, and nothing worse. Requirements are macOS 14.0 (Sonoma) or later and, for the docked
-presentation, Xcode's Simulator.app with at least one iOS runtime. If that is you, skip ahead to
-[First run](#first-run).
+presentation, an iOS simulator with at least one iOS runtime: Xcode's Simulator.app up to Xcode 26,
+or Device Hub, which replaces it from Xcode 27. Notchboard docks to either. If that is you, skip
+ahead to [First run](#first-run).
 
 Notchboard checks GitHub for a newer release once a day. When one exists, a dot appears on the
 menu-bar icon and Settings shows the version, and you install it from the menu bar or from Settings
@@ -63,8 +64,9 @@ prebuilt binary framework. Exact revisions are pinned in
 `notchboard.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. Later builds work
 offline once the packages are resolved.
 
-An iOS simulator, if you want the docked presentation. Xcode's Simulator.app plus at least one iOS
-runtime. The app is fully usable without one, as an undocked panel opened from the menu bar.
+An iOS simulator, if you want the docked presentation. Xcode's Simulator.app (up to Xcode 26) or
+Device Hub (Xcode 27 and later) plus at least one iOS runtime. The app is fully usable without one,
+as an undocked panel opened from the menu bar.
 
 No Apple developer account, and no fonts to install. Space Grotesk and JetBrains Mono are bundled in
 `notchboard/Fonts` and registered at runtime.
@@ -164,9 +166,9 @@ Setup is four steps in its own window.
 There is a "back" link from step 2 onwards, and the red traffic light quits setup with a
 confirmation.
 
-If Simulator is running when you finish, the panel docks to it as a slim notch and a coach mark
-points at it. If Simulator is not running, you land in the undocked panel instead, and the coach mark
-waits for the first time a simulator appears.
+If a simulator is running when you finish (Simulator.app or Device Hub), the panel docks to it as a
+slim notch and a coach mark points at it. If none is running, you land in the undocked panel instead,
+and the coach mark waits for the first time a simulator appears.
 
 ## The Accessibility permission
 
@@ -214,9 +216,12 @@ itself is frontmost, and only while the panel is there to respond. Switch to Ter
 back to being kill-line. Settings offers ⌘ and ⌥⌘ as alternatives if ⌃ clashes with something you
 use. Inside the panel, the plain ⌘K and ⌘N chords work as well.
 
-Simulator must be running for the docked presentation. The panel attaches to the right edge of the
-Simulator window by default, and Settings can move it to the left. Everything else about the app
+A simulator must be running for the docked presentation. The panel attaches to the right edge of the
+simulator window by default, and Settings can move it to the left. Everything else about the app
 works without a simulator through the undocked panel.
+
+With Xcode 27's Device Hub, Notchboard docks to whichever Device Hub window is on screen, the hub
+window or a compact one, and ignores hidden tabs and Device Hub's helper windows.
 
 ## The Android emulator (optional)
 
