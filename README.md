@@ -26,10 +26,12 @@ repository's releases page.
 </p>
 
 <p align="center">
-  <img src="website/public/panel-docked-brewly.jpg" width="880"
-       alt="The Notchboard panel docked to the right edge of an iOS Simulator window running the Brewly demo app's login screen. The panel lists an Espresso test account under a users tab, with DEV and STG environment chips." />
+  <a href="https://thepearl.github.io/notchboard/notchboard-promo.mp4">
+    <img src="website/public/notchboard-promo-readme.jpg" width="880"
+         alt="Play the 44-second Notchboard demo. The still shows the Brewly demo app signed in on the simulator beside the Notchboard panel, where the No Payment Method account is now marked in use by sam." />
+  </a>
   <br />
-  <sub>The panel docked to the Simulator window. That account's login is one click away, through the deeplink shown at the foot of the demo app.</sub>
+  <sub>A 44-second tour: docking, search, the one-click login, who is using what, team rooms and the Android emulator.</sub>
 </p>
 
 ## Install

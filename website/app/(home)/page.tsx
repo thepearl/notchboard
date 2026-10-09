@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 import { Card, Cards } from 'fumadocs-ui/components/card';
 import { Book, Cable, CircleQuestionMark, RotateCcwClock } from 'lucide-react';
 import icon from '@/public/notchboard-icon.png';
-import panel from '@/public/panel-docked-brewly.jpg';
+import { PromoVideo } from '@/components/promo-video';
 
 export const metadata: Metadata = {
   description:
@@ -36,6 +36,8 @@ export default function HomePage() {
         </p>
       </section>
 
+      <PromoVideo />
+
       <section>
         <h2 className="mb-3 text-xl font-semibold">Install</h2>
         <pre className="overflow-x-auto rounded-lg border bg-fd-secondary p-4 text-sm">
@@ -47,12 +49,6 @@ export default function HomePage() {
           bar.
         </p>
       </section>
-
-      <Image
-        src={panel}
-        alt="The panel docked beside a simulator running the Brewly demo app's login screen"
-        className="rounded-lg border"
-      />
 
       <section>
         <h2 className="mb-3 text-xl font-semibold">What you get</h2>
